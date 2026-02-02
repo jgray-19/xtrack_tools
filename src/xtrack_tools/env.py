@@ -8,9 +8,6 @@ import xpart as xp
 import xtrack as xt
 from xtrack import load_madx_lattice  # ty:ignore[unresolved-import]
 
-from aba_optimiser.config import BEAM_ENERGY
-from aba_optimiser.io.utils import get_lhc_file_path
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -21,7 +18,7 @@ logger = logging.getLogger(__name__)
 def create_xsuite_environment(
     beam: int | None = None,
     sequence_file: Path | None = None,
-    beam_energy: float = BEAM_ENERGY,
+    beam_energy: float = 6800,
     seq_name: str | None = None,
     rerun_madx: bool = False,
     json_file: Path | None = None,
@@ -49,9 +46,7 @@ def create_xsuite_environment(
         FileNotFoundError: If the sequence file is missing when regeneration is needed.
     """
     if sequence_file is None:
-        if beam is None:
-            raise ValueError("Either beam or sequence_file must be provided.")
-        sequence_file = get_lhc_file_path(beam)
+        raise ValueError("sequence_file must be provided.")
 
     if json_file is None:
         json_file = sequence_file.with_suffix(".json")
@@ -72,7 +67,9 @@ def create_xsuite_environment(
         logger.info(f"Loading existing xsuite environment from {json_file}")
         env = xt.Environment.from_json(json_file)  # type: ignore[attr-defined]
 
-    env[seq_name].particle_ref = xt.Particles(
+    # MAD-X converts sequence names to lowercase
+    seq_name_lower = seq_name.lower()
+    env[seq_name_lower].particle_ref = xt.Particles(
         mass=xp.PROTON_MASS_EV,
         energy0=beam_energy * 1e9,
     )
@@ -117,7 +114,7 @@ def initialise_env(
     corrector_table: tfs.TfsDataFrame,
     beam: int | None = None,
     sequence_file: Path | None = None,
-    beam_energy: float = BEAM_ENERGY,
+    beam_energy: float = 6800,
     seq_name: str | None = None,
     json_file: Path | None = None,
     strict_set=True,

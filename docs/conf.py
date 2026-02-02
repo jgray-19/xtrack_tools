@@ -22,7 +22,6 @@ exclude_patterns = ["_build"]
 html_theme = "alabaster"
 
 autodoc_mock_imports = [
-    "aba_optimiser",
     "numpy",
     "pandas",
     "tfs",

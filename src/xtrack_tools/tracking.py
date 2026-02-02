@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from xobjects import ContextCpu as Context
 
-from aba_optimiser.simulation.coordinates import create_initial_conditions
+from xtrack_tools.coordinates import create_initial_conditions
 
 from .action_angle import _build_coords_from_action_angle
 from .monitors import insert_particle_monitors_at_pattern

@@ -14,9 +14,8 @@ import pytest
 import xpart as xp
 import xtrack as xt
 
-aba_config = pytest.importorskip("aba_optimiser.config")
-BEAM_ENERGY = aba_config.BEAM_ENERGY
-LHCB1_SEQ_NAME = aba_config.LHCB1_SEQ_NAME
+BEAM_ENERGY = 6800 # in GeV
+LHCB1_SEQ_NAME = "lhcb1"
 
 from xtrack_tools.acd import insert_ac_dipole, run_acd_twiss
 from xtrack_tools.env import create_xsuite_environment, initialise_env
@@ -93,9 +92,11 @@ def test_create_xsuite_environment(tmp_path, seq_b1):
     env = create_xsuite_environment(
         sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, json_file=json_file
     )
-    assert LHCB1_SEQ_NAME in env.lines
+    # MAD-X converts sequence names to lowercase
+    seq_name_lower = LHCB1_SEQ_NAME.lower()
+    assert seq_name_lower in env.lines
     assert json_file.exists()
-    line = env.lines[LHCB1_SEQ_NAME]
+    line = env.lines[seq_name_lower]
     assert np.isclose(line.particle_ref.energy0[0], BEAM_ENERGY * 1e9, rtol=1e-10)
     assert len(line.particle_ref.energy0) == 1
 
@@ -106,22 +107,22 @@ def test_create_xsuite_environment(tmp_path, seq_b1):
     )
     mod_time_after = json_file.stat().st_mtime
     assert mod_time_before == mod_time_after
-    assert LHCB1_SEQ_NAME in env2.lines
+    assert seq_name_lower in env2.lines
 
     env3 = create_xsuite_environment(
         sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, rerun_madx=True, json_file=json_file
     )
     mod_time_after_rerun = json_file.stat().st_mtime
     assert mod_time_after_rerun > mod_time_after
-    assert LHCB1_SEQ_NAME in env3.lines
+    assert seq_name_lower in env3.lines
 
     # Test custom json and energy
     temp_json = tmp_path / "temp_xsuite.json"
     env4 = create_xsuite_environment(
         sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, json_file=temp_json, beam_energy=450
     )
-    assert LHCB1_SEQ_NAME in env4.lines
-    line4 = env4.lines[LHCB1_SEQ_NAME]
+    assert seq_name_lower in env4.lines
+    line4 = env4.lines[seq_name_lower]
     assert np.isclose(line4.particle_ref.energy0[0], 450e9, rtol=1e-10)
     assert len(line4.particle_ref.energy0) == 1
 
@@ -135,7 +136,13 @@ def test_create_xsuite_environment(tmp_path, seq_b1):
     )
     mod_time_after = json_file.stat().st_mtime
     assert mod_time_after > mod_time_before
-    assert LHCB1_SEQ_NAME in env5.lines
+    assert seq_name_lower in env5.lines
+
+
+def test_create_xsuite_environment_requires_sequence_file():
+    """Ensure sequence_file is required."""
+    with pytest.raises(ValueError, match="sequence_file must be provided"):
+        create_xsuite_environment(sequence_file=None)
 
 
 @pytest.mark.parametrize(

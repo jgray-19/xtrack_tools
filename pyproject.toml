@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 dependencies = [
-    "aba-optimiser",
     "numpy",
     "pandas",
     "tfs-pandas",
@@ -25,6 +24,9 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+]
+aba = [
+    "aba-optimiser",
 ]
 docs = [
     "sphinx>=7",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from aba_optimiser.simulation.coordinates import create_initial_conditions
+from xtrack_tools.coordinates import create_initial_conditions
 
 if TYPE_CHECKING:
     import xtrack as xt
