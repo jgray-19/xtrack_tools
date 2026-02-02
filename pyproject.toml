@@ -31,6 +31,7 @@ aba = [
 docs = [
     "sphinx>=7",
     "sphinx-autodoc-typehints",
+    "sphinx-rtd-theme",
 ]
 
 [tool.setuptools]

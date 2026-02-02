@@ -19,7 +19,7 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build"]
 
-html_theme = "alabaster"
+html_theme = "sphinx_rtd_theme"
 
 autodoc_mock_imports = [
     "numpy",
