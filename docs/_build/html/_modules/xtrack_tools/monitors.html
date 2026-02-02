@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>xtrack_tools.monitors &#8212; xtrack-tools 0.0.1 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../_static/documentation_options.js?v=d45e8c67"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for xtrack_tools.monitors</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">re</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">tfs</span>
+<span class="kn">import</span> <span class="nn">xtrack</span> <span class="k">as</span> <span class="nn">xt</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="insert_particle_monitors_at_pattern">
+<a class="viewcode-back" href="../../api.html#xtrack_tools.monitors.insert_particle_monitors_at_pattern">[docs]</a>
+<span class="k">def</span> <span class="nf">insert_particle_monitors_at_pattern</span><span class="p">(</span>
+    <span class="n">line</span><span class="p">:</span> <span class="n">xt</span><span class="o">.</span><span class="n">Line</span><span class="p">,</span>
+    <span class="n">pattern</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">num_turns</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10_000</span><span class="p">,</span>
+    <span class="n">num_particles</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="n">inplace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">xt</span><span class="o">.</span><span class="n">Line</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Insert ``ParticlesMonitor`` elements at locations matching a regex pattern.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        line: The line to modify.</span>
+<span class="sd">        pattern: Regex pattern used to select element names.</span>
+<span class="sd">        num_turns: Number of turns to record.</span>
+<span class="sd">        num_particles: Number of particles to track in each monitor.</span>
+<span class="sd">        inplace: If ``True``, modify ``line`` in place; otherwise operate on a copy.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The line containing inserted monitors.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">monitored_line</span> <span class="o">=</span> <span class="n">line</span> <span class="k">if</span> <span class="n">inplace</span> <span class="k">else</span> <span class="n">line</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">selected_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">monitored_line</span><span class="o">.</span><span class="n">element_names</span> <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">name</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">selected_list</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No elements found matching pattern &#39;</span><span class="si">{</span><span class="n">pattern</span><span class="si">}</span><span class="s2">&#39;.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">monitored_line</span>
+
+    <span class="n">s_positions</span> <span class="o">=</span> <span class="n">monitored_line</span><span class="o">.</span><span class="n">get_s_position</span><span class="p">(</span><span class="n">selected_list</span><span class="p">)</span>
+
+    <span class="n">inserts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">selected_list</span><span class="p">,</span> <span class="n">s_positions</span><span class="p">):</span>
+        <span class="n">name_upper</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">name_upper</span> <span class="ow">in</span> <span class="n">monitored_line</span><span class="o">.</span><span class="n">element_names</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Element &#39;</span><span class="si">{</span><span class="n">name_upper</span><span class="si">}</span><span class="s2">&#39; already exists and is being replaced with a monitor.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">monitored_line</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">_element_dict</span><span class="p">[</span><span class="n">name_upper</span><span class="p">]</span> <span class="o">=</span> <span class="n">xt</span><span class="o">.</span><span class="n">ParticlesMonitor</span><span class="p">(</span>
+            <span class="n">start_at_turn</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">stop_at_turn</span><span class="o">=</span><span class="n">num_turns</span><span class="p">,</span> <span class="n">num_particles</span><span class="o">=</span><span class="n">num_particles</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">name_upper</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">monitored_line</span><span class="o">.</span><span class="n">element_names</span><span class="p">:</span>
+            <span class="n">inserts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">monitored_line</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">name_upper</span><span class="p">,</span> <span class="n">at</span><span class="o">=</span><span class="n">s</span><span class="p">))</span>
+
+    <span class="n">monitored_line</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">inserts</span><span class="p">)</span>  <span class="c1"># ty:ignore[possibly-missing-attribute]</span>
+    <span class="k">return</span> <span class="n">monitored_line</span></div>
+
+
+
+<div class="viewcode-block" id="line_to_dataframes">
+<a class="viewcode-back" href="../../api.html#xtrack_tools.monitors.line_to_dataframes">[docs]</a>
+<span class="k">def</span> <span class="nf">line_to_dataframes</span><span class="p">(</span><span class="n">tracked_line</span><span class="p">:</span> <span class="n">xt</span><span class="o">.</span><span class="n">Line</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert monitor data in a tracked line into per-particle DataFrames.</span>
+
+<span class="sd">    Each returned DataFrame contains the monitor name, turn index (1-based), and</span>
+<span class="sd">    transverse coordinates for a single particle.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        tracked_line: Line containing ``ParticlesMonitor`` elements with data.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A list of DataFrames, one per particle.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ValueError: If no monitors exist or monitors have inconsistent particle counts.</span>
+<span class="sd">        AssertionError: If particles were lost during tracking.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">monitor_pairs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">xt</span><span class="o">.</span><span class="n">ParticlesMonitor</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">elem</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">elem</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">tracked_line</span><span class="o">.</span><span class="n">element_names</span><span class="p">,</span> <span class="n">tracked_line</span><span class="o">.</span><span class="n">elements</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">elem</span><span class="p">,</span> <span class="n">xt</span><span class="o">.</span><span class="n">ParticlesMonitor</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">monitor_pairs</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;No ParticlesMonitor found in the Line. Please add a ParticlesMonitor to the Line.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">monitor_names</span><span class="p">,</span> <span class="n">monitors</span> <span class="o">=</span> <span class="nb">zip</span><span class="p">(</span><span class="o">*</span><span class="n">monitor_pairs</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="nb">all</span><span class="p">(</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">particle_id</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">particle_id</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="k">for</span> <span class="n">mon</span> <span class="ow">in</span> <span class="n">monitors</span><span class="p">),</span> <span class="p">(</span>
+        <span class="s2">&quot;Some particles were lost during tracking, which is not supported by this function. &quot;</span>
+        <span class="s2">&quot;Ensure that all particles are tracked through the entire line without loss.&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">npart_set</span> <span class="o">=</span> <span class="p">{</span><span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">particle_id</span><span class="p">))</span> <span class="k">for</span> <span class="n">mon</span> <span class="ow">in</span> <span class="n">monitors</span><span class="p">}</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">npart_set</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Monitors have different number of particles, maybe some lost particles?&quot;</span><span class="p">)</span>
+    <span class="n">npart</span> <span class="o">=</span> <span class="n">npart_set</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+
+    <span class="n">num_turns</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">monitors</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">x</span><span class="p">)</span> <span class="o">//</span> <span class="n">npart</span>
+    <span class="n">particle_masks</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">particle_id</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">==</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">npart</span><span class="p">)[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="k">for</span> <span class="n">mon</span> <span class="ow">in</span> <span class="n">monitors</span>
+    <span class="p">]</span>
+
+    <span class="n">tracking_dataframes</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">pid</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">npart</span><span class="p">):</span>
+        <span class="n">monitor_names_rep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span><span class="n">monitor_names</span><span class="p">,</span> <span class="n">num_turns</span><span class="p">)</span>
+        <span class="n">turns_rep</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">num_turns</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">monitor_names</span><span class="p">))</span>
+
+        <span class="n">x_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">x</span><span class="p">[</span><span class="n">particle_masks</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="n">pid</span><span class="p">]]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">mon</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">monitors</span><span class="p">)]</span>
+        <span class="p">)</span>
+        <span class="n">y_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">y</span><span class="p">[</span><span class="n">particle_masks</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="n">pid</span><span class="p">]]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">mon</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">monitors</span><span class="p">)]</span>
+        <span class="p">)</span>
+        <span class="n">px_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">px</span><span class="p">[</span><span class="n">particle_masks</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="n">pid</span><span class="p">]]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">mon</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">monitors</span><span class="p">)]</span>
+        <span class="p">)</span>
+        <span class="n">py_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">mon</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">py</span><span class="p">[</span><span class="n">particle_masks</span><span class="p">[</span><span class="n">i</span><span class="p">][:,</span> <span class="n">pid</span><span class="p">]]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">mon</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">monitors</span><span class="p">)]</span>
+        <span class="p">)</span>
+
+        <span class="n">tracking_data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">monitor_names_rep</span><span class="p">,</span>
+                <span class="s2">&quot;turn&quot;</span><span class="p">:</span> <span class="n">turns_rep</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="n">x_data</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span>
+                <span class="s2">&quot;px&quot;</span><span class="p">:</span> <span class="n">px_data</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span>
+                <span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="n">y_data</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span>
+                <span class="s2">&quot;py&quot;</span><span class="p">:</span> <span class="n">py_data</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">tracking_dataframes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tracking_data</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tracking_dataframes</span></div>
+
+
+
+<div class="viewcode-block" id="process_tracking_data">
+<a class="viewcode-back" href="../../api.html#xtrack_tools.monitors.process_tracking_data">[docs]</a>
+<span class="k">def</span> <span class="nf">process_tracking_data</span><span class="p">(</span>
+    <span class="n">monitored_line</span><span class="p">:</span> <span class="n">xt</span><span class="o">.</span><span class="n">Line</span><span class="p">,</span>
+    <span class="n">ramp_turns</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">,</span>
+    <span class="n">flattop_turns</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100</span><span class="p">,</span>
+    <span class="n">add_variance_columns</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Trim ramp turns from tracking data and optionally add variance columns.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        monitored_line: Line with monitor data already collected.</span>
+<span class="sd">        ramp_turns: Number of initial turns to discard.</span>
+<span class="sd">        flattop_turns: Number of turns to keep after the ramp (informational).</span>
+<span class="sd">        add_variance_columns: Whether to add default variance and kick-plane columns.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A single DataFrame containing processed tracking data for the first particle.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">tracking_df</span> <span class="o">=</span> <span class="n">line_to_dataframes</span><span class="p">(</span><span class="n">monitored_line</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">tracking_df</span> <span class="o">=</span> <span class="n">tracking_df</span><span class="p">[</span><span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;turn&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">ramp_turns</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;turn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;turn&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">ramp_turns</span>
+    <span class="n">tracking_df</span> <span class="o">=</span> <span class="n">tracking_df</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">add_variance_columns</span><span class="p">:</span>
+        <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;var_x&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1e-4</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;var_y&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1e-4</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;var_px&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">3e-6</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;var_py&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mf">3e-6</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">tracking_df</span><span class="p">[</span><span class="s2">&quot;kick_plane&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;xy&quot;</span>
+
+    <span class="k">return</span> <span class="n">tracking_df</span></div>
+
+
+
+<div class="viewcode-block" id="xsuite_tws_to_ng">
+<a class="viewcode-back" href="../../api.html#xtrack_tools.monitors.xsuite_tws_to_ng">[docs]</a>
+<span class="k">def</span> <span class="nf">xsuite_tws_to_ng</span><span class="p">(</span><span class="n">tws</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert an xsuite Twiss object to an NG-compatible ``tfs`` DataFrame.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        tws: xsuite Twiss object.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A ``tfs.TfsDataFrame`` with NG-compatible column names and headers.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">tws_df</span> <span class="o">=</span> <span class="n">tws</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+    <span class="n">tws_df</span> <span class="o">=</span> <span class="n">tfs</span><span class="o">.</span><span class="n">TfsDataFrame</span><span class="p">(</span><span class="n">tws_df</span><span class="p">)</span>
+    <span class="n">tws_df</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">tws_df</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+    <span class="n">tws_df</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tws_df</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>  <span class="c1"># ty:ignore[unresolved-attribute]</span>
+    <span class="n">tws_df</span> <span class="o">=</span> <span class="n">tws_df</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span>
+        <span class="n">columns</span><span class="o">=</span><span class="p">{</span>
+            <span class="s2">&quot;betx&quot;</span><span class="p">:</span> <span class="s2">&quot;beta11&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;bety&quot;</span><span class="p">:</span> <span class="s2">&quot;beta22&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;alfx&quot;</span><span class="p">:</span> <span class="s2">&quot;alfa11&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;alfy&quot;</span><span class="p">:</span> <span class="s2">&quot;alfa22&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;mux&quot;</span><span class="p">:</span> <span class="s2">&quot;mu1&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;muy&quot;</span><span class="p">:</span> <span class="s2">&quot;mu2&quot;</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+    <span class="n">tws_df</span><span class="o">.</span><span class="n">headers</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;q1&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">tws</span><span class="o">.</span><span class="n">qx</span> <span class="o">%</span> <span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;q2&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">tws</span><span class="o">.</span><span class="n">qy</span> <span class="o">%</span> <span class="mi">1</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="n">tws_df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">xtrack-tools</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api.html">xtrack_tools API</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
