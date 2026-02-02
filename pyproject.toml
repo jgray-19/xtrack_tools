@@ -13,9 +13,9 @@ dependencies = [
     "numpy",
     "pandas",
     "tfs-pandas",
+    "xtrack",
     "xobjects",
     "xpart",
-    "xtrack",
 ]
 
 [project.optional-dependencies]
@@ -24,9 +24,6 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
-]
-aba = [
-    "aba-optimiser",
 ]
 docs = [
     "sphinx>=7",
