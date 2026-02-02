@@ -1,6 +1,6 @@
 # xtrack-tools
 
-[![Coverage](https://github.com/jgray-19/xtrack-tools/actions/workflows/coverage.yml/badge.svg)](https://github.com/jgray-19/xtrack-tools/actions/workflows/coverage.yml)
+[![Coverage](https://github.com/jgray-19/xtrack_tools/actions/workflows/coverage.yml/badge.svg)](https://github.com/jgray-19/xtrack_tools/actions/workflows/coverage.yml)
 
 Local tools for xtrack/xsuite workflows.
 
