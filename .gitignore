@@ -60,3 +60,6 @@ pip-wheel-metadata/
 .DS_Store
 Thumbs.db
 ._*
+
+# Sphinx build artifacts
+docs/_build/
