@@ -1,0 +1,98 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xtrack-tools"
+version = "0.0.1"
+description = "Local tools for xtrack/xsuite workflows."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "aba-optimiser",
+    "numpy",
+    "pandas",
+    "tfs-pandas",
+    "xobjects",
+    "xpart",
+    "xtrack",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+docs = [
+    "sphinx>=7",
+    "sphinx-autodoc-typehints",
+]
+
+[tool.setuptools]
+packages = ["xtrack_tools"]
+package-dir = {"" = "src"}
+
+[tool.coverage.run]
+source = ["src/xtrack_tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["tests/data"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+addopts = [
+    "--log-cli-level=WARNING",
+    "--log-level=WARNING",
+    "--log-cli-format=%(levelname)s %(name)s %(message)s",
+    "-s",
+]
+
+[tool.ruff]
+exclude = [
+  ".eggs",
+  ".git",
+  ".mypy_cache",
+  ".venv",
+  "_build",
+  "build",
+  "dist",
+]
+target-version = "py310"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+ignore = [
+  "E501",
+  "FBT001",
+  "FBT002",
+  "PT019",
+]
+extend-select = [
+    "F",
+    "W",
+    "E",
+    "I",
+    "A",
+    "N",
+    "UP",
+    "C4",
+    "FA",
+    "FBT",
+    "ISC",
+    "BLE",
+    "ICN",
+    "RET",
+    "SIM",
+    "TID",
+    "TC",
+    "PTH",
+    "NPY",
+]
+fixable = ["ALL"]
+unfixable = []
