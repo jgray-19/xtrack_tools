@@ -14,13 +14,13 @@ import pytest
 import xpart as xp
 import xtrack as xt
 
-BEAM_ENERGY = 6800 # in GeV
-LHCB1_SEQ_NAME = "lhcb1"
-
 from xtrack_tools.acd import insert_ac_dipole, run_acd_twiss
 from xtrack_tools.env import create_xsuite_environment, initialise_env
 from xtrack_tools.monitors import insert_particle_monitors_at_pattern, line_to_dataframes
 from xtrack_tools.tracking import run_tracking
+
+BEAM_ENERGY = 6800  # in GeV
+LHCB1_SEQ_NAME = "lhcb1"
 
 
 @pytest.fixture(scope="function")
@@ -176,17 +176,17 @@ def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, 
         seq_name=LHCB1_SEQ_NAME,
         json_file=json_file,
     )
-    assert env["dqx.b1_op"] == qx  # ty:ignore[not-subscriptable]
-    assert env["dqy.b1_op"] == qy  # ty:ignore[not-subscriptable]
-    assert np.isclose(env["mqy.b5l2.b1"].k1, k1_mqy)  # ty:ignore[not-subscriptable]
-    assert np.isclose(env["mb.b8r2.b1"].k0, k0_mb)  # ty:ignore[not-subscriptable]
-    assert np.isclose(env["mcs.b8r2.b1"].k2, k2_mcs)  # ty:ignore[not-subscriptable]
+    assert env["dqx.b1_op"] == qx
+    assert env["dqy.b1_op"] == qy
+    assert np.isclose(env["mqy.b5l2.b1"].k1, k1_mqy)
+    assert np.isclose(env["mb.b8r2.b1"].k0, k0_mb)
+    assert np.isclose(env["mcs.b8r2.b1"].k2, k2_mcs)
 
     for row in corrector_table.itertuples():
-        assert len(env[row.ename.lower()].knl) == 1  # ty:ignore[not-subscriptable]
-        assert np.isclose(env[row.ename.lower()].knl[0], -row.hkick)  # ty:ignore[not-subscriptable]
-        assert len(env[row.ename.lower()].ksl) == 1  # ty:ignore[not-subscriptable]
-        assert np.isclose(env[row.ename.lower()].ksl[0], row.vkick)  # ty:ignore[not-subscriptable]
+        assert len(env[row.ename.lower()].knl) == 1
+        assert np.isclose(env[row.ename.lower()].knl[0], -row.hkick)
+        assert len(env[row.ename.lower()].ksl) == 1
+        assert np.isclose(env[row.ename.lower()].ksl[0], row.vkick)
 
 
 @pytest.mark.parametrize(
@@ -221,7 +221,7 @@ def test_insert_particle_monitors_at_pattern(
             start_at_turn=0, stop_at_turn=10, num_particles=1
         )
         bpm_index = test_line.element_names.index(bpm_name)
-        test_line.insert(monitor_name, at=bpm_index + 1)  # ty:ignore[unresolved-attribute]
+        test_line.insert(monitor_name, at=bpm_index + 1)
 
     initial_num_elements = len(test_line.elements)
     new_line = insert_particle_monitors_at_pattern(
@@ -273,8 +273,8 @@ def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
     # Check that they are ACDipole elements
     acdh = new_line[acdh_name]
     acdv = new_line[acdv_name]
-    assert isinstance(acdh, xt.ACDipole)  # ty:ignore[unresolved-attribute]
-    assert isinstance(acdv, xt.ACDipole)  # ty:ignore[unresolved-attribute]
+    assert isinstance(acdh, xt.ACDipole)
+    assert isinstance(acdv, xt.ACDipole)
 
     # Check properties
     assert acdh.plane == "h"

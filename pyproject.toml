@@ -13,6 +13,7 @@ dependencies = [
     "numpy",
     "pandas",
     "tfs-pandas",
+    "xsuite",
     "xtrack",
     "xobjects",
     "xpart",
