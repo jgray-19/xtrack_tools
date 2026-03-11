@@ -5,8 +5,8 @@ This module contains pytest tests for the xsuite_tools functions.
 """
 
 import os
-import re
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,11 @@ import xtrack as xt
 
 from xtrack_tools.acd import insert_ac_dipole, run_acd_twiss
 from xtrack_tools.env import create_xsuite_environment, initialise_env
-from xtrack_tools.monitors import insert_particle_monitors_at_pattern, line_to_dataframes
+from xtrack_tools.monitors import (
+    get_monitor_names_at_pattern,
+    line_to_dataframes,
+    replace_thick_monitors_with_thin_markers,
+)
 from xtrack_tools.tracking import run_tracking
 
 BEAM_ENERGY = 6800  # in GeV
@@ -189,63 +193,18 @@ def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, 
         assert np.isclose(env[row.ename.lower()].ksl[0], row.vkick)
 
 
-@pytest.mark.parametrize(
-    "pattern, inplace, pre_add_existing, num_turns, num_part",
-    [
-        ("bpm.", False, False, 10, 5),
-        ("quad.", False, False, 5, 2),
-        ("bpm.", True, False, 10, 5),
-        ("bpm.", False, True, 10, 1),
-    ],
-    ids=[
-        "bpm pattern, not inplace, no existing",
-        "quad pattern, not inplace, no existing",
-        "bpm pattern, inplace, no existing",
-        "bpm pattern, not inplace, with existing",
-    ],
-)
-def test_insert_particle_monitors_at_pattern(
-    test_line: xt.Line,
-    pattern: str,
-    inplace: bool,
-    pre_add_existing: bool,
-    num_turns: int,
-    num_part: int,
-):
-    """Test inserting particle monitors at various patterns with different options."""
-    if pre_add_existing:
-        # Manually add a monitor with uppercase name
-        bpm_name = "bpm.1"
-        monitor_name = bpm_name.upper()
-        test_line.env._element_dict[monitor_name] = xt.ParticlesMonitor(
-            start_at_turn=0, stop_at_turn=10, num_particles=1
-        )
-        bpm_index = test_line.element_names.index(bpm_name)
-        test_line.insert(monitor_name, at=bpm_index + 1)
+@pytest.mark.parametrize(("pattern", "expected"), [("bpm.", 4), ("quad.", 4)])
+def test_get_monitor_names_at_pattern(test_line: xt.Line, pattern: str, expected: int):
+    """Test selecting monitor names by regex pattern."""
+    monitor_names = get_monitor_names_at_pattern(test_line, pattern)
+    assert len(monitor_names) == expected
+    assert all(pattern.split(".")[0] in name for name in monitor_names)
 
-    initial_num_elements = len(test_line.elements)
-    new_line = insert_particle_monitors_at_pattern(
-        test_line, pattern, num_turns=num_turns, num_particles=num_part, inplace=inplace
-    )
 
-    if inplace:
-        assert new_line is test_line
-    else:
-        assert new_line is not test_line
-
-    num_matches = sum(1 for name in test_line.element_names if re.match(pattern, name))
-    expected_add = num_matches if not pre_add_existing else num_matches - 1  # since one replaced
-    assert len(new_line.elements) == initial_num_elements + expected_add
-
-    # Check that monitors exist with correct properties
-    for name in test_line.element_names:
-        if re.match(pattern, name):
-            monitor_name = name.upper()
-            assert monitor_name in new_line.element_names
-            monitor = new_line[monitor_name]
-            assert isinstance(monitor, xt.ParticlesMonitor)
-            assert monitor.x.shape == (num_part, num_turns)
-            assert monitor.y.shape == (num_part, num_turns)
+def test_get_monitor_names_at_pattern_raises_on_no_match(test_line: xt.Line):
+    """Test selecting monitor names raises when nothing matches."""
+    with pytest.raises(ValueError, match="No elements found matching pattern"):
+        get_monitor_names_at_pattern(test_line, "sext.")
 
 
 def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
@@ -362,87 +321,160 @@ def test_run_tracking(test_line: xt.Line, nturns: int, num_particles: int):
         delta=np.zeros(num_particles),
     )
 
-    # Insert monitors at BPM locations with more turns than we'll track
-    monitor_turns = nturns + 10  # More than nturns
-    monitored_line = insert_particle_monitors_at_pattern(
-        test_line,
-        pattern="bpm.",
-        num_turns=monitor_turns,
-        num_particles=num_particles,
-        inplace=False,
-    )
+    # Configure monitoring at BPM locations
+    monitored_line = test_line.copy()
+    monitor_names = get_monitor_names_at_pattern(monitored_line, "bpm.")
 
     # Run tracking for nturns
-    run_tracking(monitored_line, particles, nturns)
+    tracked_line = run_tracking(monitored_line, particles, nturns, monitor_names=monitor_names)
 
     # Check that tracking completed successfully for all particles
     assert np.all(particles.state == 1)
 
-    # Verify monitors recorded data for exactly nturns turns per particle
-    bpm_names = ["bpm.1", "bpm.2", "bpm.3", "bpm.4"]
-    for bpm in bpm_names:
-        monitor_name = bpm.upper()
-        assert monitor_name in monitored_line.element_names
-        monitor = monitored_line[monitor_name]
-        assert isinstance(monitor, xt.ParticlesMonitor)
+    with pytest.raises(ValueError, match="No multi-element monitor data found"):
+        line_to_dataframes(monitored_line)
 
-        # Check that state shows exactly nturns * num_particles successful recordings
-        expected_successful = nturns * num_particles
-        successful_turns = np.sum(monitor.data.state[:] == 1)
-        assert successful_turns == expected_successful, (
-            f"BPM {bpm} recorded {successful_turns} turns, expected {expected_successful}"
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert monitor.obs_names == ["BPM.1", "BPM.2", "BPM.3", "BPM.4"]
+    assert np.asarray(monitor.get("x")).shape == (nturns, num_particles, 4)
+    assert np.asarray(monitor.get("y")).shape == (nturns, num_particles, 4)
+    assert np.asarray(monitor.get("px")).shape == (nturns, num_particles, 4)
+    assert np.asarray(monitor.get("py")).shape == (nturns, num_particles, 4)
+
+
+def test_run_tracking_can_replace_thick_monitors_with_thin():
+    """Test replacing thick monitored elements with thin markers before tracking."""
+    monitored_line = xt.Line(
+        elements=[
+            xt.Drift(length=2.0),
+            xt.Quadrupole(length=1.0, k1=0.2),
+            xt.Drift(length=0.4),
+            xt.Drift(length=2.0),
+            xt.Quadrupole(length=1.0, k1=-0.2),
+            xt.Drift(length=0.6),
+            xt.Drift(length=2.0),
+        ],
+        element_names=[
+            "drift1",
+            "quad.1",
+            "bpm.1",
+            "drift2",
+            "quad.2",
+            "bpm.2",
+            "drift3",
+        ],
+    )
+    monitored_line.particle_ref = xt.Particles(
+        mass=xp.PROTON_MASS_EV,
+        energy0=450e9,
+    )
+    original_element_names = tuple(monitored_line.element_names)
+
+    original_table = monitored_line.get_table()
+    original_length = monitored_line.get_length()
+    original_centres = {
+        name: float(original_table["s_center", name]) for name in ("bpm.1", "bpm.2")
+    }
+
+    particles = monitored_line.build_particles(
+        x=np.zeros(2),
+        px=np.zeros(2),
+        y=np.zeros(2),
+        py=np.zeros(2),
+        delta=np.zeros(2),
+    )
+    monitor_names = get_monitor_names_at_pattern(monitored_line, "bpm.")
+
+    tracked_line = run_tracking(
+        monitored_line,
+        particles,
+        3,
+        monitor_names=monitor_names,
+        replace_thick_monitors_with_thin=True,
+    )
+
+    assert tuple(monitored_line.element_names) == original_element_names
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert monitor.obs_names == ["BPM.1", "BPM.2"]
+    assert np.asarray(monitor.get("x")).shape == (3, 2, 2)
+    assert np.isclose(tracked_line.get_length(), original_length)
+
+    inserted_monitor_names = [name for name in tracked_line.element_names if "__thin" in name]
+    assert len(inserted_monitor_names) == 2
+    for inserted_name, original_name in zip(
+        inserted_monitor_names, ("bpm.1", "bpm.2"), strict=True
+    ):
+        assert isinstance(tracked_line[inserted_name]._get_viewed_object(), xt.Marker)
+        assert np.isclose(
+            tracked_line.get_s_position(inserted_name), original_centres[original_name]
         )
 
-        # Check shapes: (num_particles, monitor_turns)
-        assert monitor.x.shape == (num_particles, monitor_turns)
 
-        # Check that the first nturns have state=1 for all particles, rest have state!=1
-        state_data = monitor.data.state[:].reshape(num_particles, monitor_turns)
-        assert np.all(state_data[:, :nturns] == 1)
-        assert np.all(state_data[:, nturns:] != 1)
+@pytest.mark.slow
+def test_replace_thick_monitors_preserves_sps_centres(seq_sps: Path, tmp_path):
+    """Test SPS thick monitors are sliced around thin markers at the same centre position."""
+    env = create_xsuite_environment(
+        sequence_file=seq_sps,
+        seq_name="sps",
+        beam_energy=450,
+        json_file=tmp_path / "sps.json",
+    )
+    line = env.lines["sps"]
+    thick_monitor_names = [
+        name
+        for name in get_monitor_names_at_pattern(line, r"bp.*")
+        if float(getattr(line[name], "length", 0.0)) > 0
+    ]
+
+    assert thick_monitor_names
+    table_before = line.get_table()
+    original_centres = np.asarray(
+        [table_before["s_center", name] for name in thick_monitor_names], dtype=float
+    )
+
+    working_line = line.copy()
+    thin_names, alias_map = replace_thick_monitors_with_thin_markers(
+        working_line, thick_monitor_names
+    )
+    inserted_positions = np.asarray(
+        [working_line.get_s_position(thin_name) for thin_name in thin_names], dtype=float
+    )
+    twiss_after = working_line.twiss(method="4d")
+    thin_twiss_positions = np.asarray([twiss_after["s", thin_name] for thin_name in thin_names], dtype=float)
+    second_slice_positions = np.asarray(
+        [twiss_after["s", f"{original_name}..1"] for original_name in thick_monitor_names],
+        dtype=float,
+    )
+
+    assert len(thin_names) == len(thick_monitor_names)
+    assert [alias_map[thin_name] for thin_name in thin_names] == thick_monitor_names
+    assert np.allclose(inserted_positions, original_centres, atol=1e-12, rtol=0)
+    assert np.allclose(thin_twiss_positions, second_slice_positions, atol=1e-12, rtol=0)
+
+    for original_name, thin_name in zip(thick_monitor_names, thin_names, strict=True):
+        assert thin_name in working_line.element_names
+        assert original_name not in working_line.element_names
+        assert f"{original_name}..0" in working_line.element_names
+        assert f"{original_name}..1" in working_line.element_names
 
 
 def test_line_to_dataframes(test_line: xt.Line):
-    """Test converting tracked line to list of DataFrames."""
-    # Create a simple line with 2 monitors
-    env = xt.Environment()
-    simple_line = xt.Line(
-        elements=[
-            xt.Drift(length=1.0),
-            xt.ParticlesMonitor(num_particles=2, start_at_turn=0, stop_at_turn=2),
-            xt.Drift(length=1.0),
-            xt.ParticlesMonitor(num_particles=2, start_at_turn=0, stop_at_turn=2),
-        ],
-        element_names=["drift1", "MONITOR1", "drift2", "MONITOR2"],
+    """Test converting multi-element monitor tracking data to list of DataFrames."""
+    monitored_line = test_line.copy()
+    monitor_names = get_monitor_names_at_pattern(monitored_line, "bpm.")
+    particles = monitored_line.build_particles(
+        x=[1e-6, 2e-6],
+        px=[1e-7, 2e-7],
+        y=[3e-6, 4e-6],
+        py=[3e-7, 4e-7],
+        delta=[0.0, 0.0],
     )
-    env.lines["simple"] = simple_line
+    tracked_line = run_tracking(monitored_line, particles, 2, monitor_names=monitor_names)
 
-    # Set up simple tracking data for 2 particles, 2 turns
-    # Data format: [p0_t0, p1_t0, p0_t1, p1_t1]
-    simple_line["MONITOR1"].data.particle_id[:] = [0, 1, 0, 1]
-    simple_line["MONITOR1"].data.x[:] = [
-        1.0,
-        2.0,
-        3.0,
-        4.0,
-    ]  # Monitor 1: p0: [1,3], p1: [2,4]
-    simple_line["MONITOR1"].data.px[:] = [0.1, 0.2, 0.3, 0.4]
-    simple_line["MONITOR1"].data.y[:] = [0.01, 0.02, 0.03, 0.04]
-    simple_line["MONITOR1"].data.py[:] = [0.001, 0.002, 0.003, 0.004]
-
-    simple_line["MONITOR2"].data.particle_id[:] = [0, 1, 0, 1]
-    simple_line["MONITOR2"].data.x[:] = [
-        10.0,
-        20.0,
-        30.0,
-        40.0,
-    ]  # Monitor 2: p0: [10,30], p1: [20,40]
-    simple_line["MONITOR2"].data.px[:] = [0.01, 0.02, 0.03, 0.04]
-    simple_line["MONITOR2"].data.y[:] = [0.001, 0.002, 0.003, 0.004]
-    simple_line["MONITOR2"].data.py[:] = [0.0001, 0.0002, 0.0003, 0.0004]
-
-    # Call the function
-    dataframes = line_to_dataframes(simple_line)
+    dataframes = line_to_dataframes(tracked_line)
 
     # Should return one DataFrame per particle
     assert len(dataframes) == 2
@@ -452,84 +484,14 @@ def test_line_to_dataframes(test_line: xt.Line):
     expected_columns = ["name", "turn", "x", "px", "y", "py"]
     for df in dataframes:
         assert list(df.columns) == expected_columns
-        assert len(df) == 4  # 2 monitors × 2 turns
-
-    # Check particle 0 data
-    df_p0 = dataframes[0]
-    # Should have data from both monitors for both turns
-    monitor1_data = df_p0[df_p0["name"] == "MONITOR1"]
-    monitor2_data = df_p0[df_p0["name"] == "MONITOR2"]
-
-    # Particle 0: MONITOR1 should have x=[1.0, 3.0] for turns [1, 2]
-    assert list(monitor1_data["x"]) == [1.0, 3.0]
-    assert list(monitor1_data["turn"]) == [1, 2]
-
-    # Particle 0: MONITOR2 should have x=[10.0, 30.0] for turns [1, 2]
-    assert list(monitor2_data["x"]) == [10.0, 30.0]
-    assert list(monitor2_data["turn"]) == [1, 2]
-
-    # Check particle 1 data
-    df_p1 = dataframes[1]
-    monitor1_data = df_p1[df_p1["name"] == "MONITOR1"]
-    monitor2_data = df_p1[df_p1["name"] == "MONITOR2"]
-
-    # Particle 1: MONITOR1 should have x=[2.0, 4.0] for turns [1, 2]
-    assert list(monitor1_data["x"]) == [2.0, 4.0]
-    assert list(monitor1_data["turn"]) == [1, 2]
-
-    # Particle 1: MONITOR2 should have x=[20.0, 40.0] for turns [1, 2]
-    assert list(monitor2_data["x"]) == [20.0, 40.0]
-    assert list(monitor2_data["turn"]) == [1, 2]
+        assert len(df) == 8  # 4 monitors × 2 turns
+        assert df["name"].tolist()[:4] == ["BPM.1", "BPM.2", "BPM.3", "BPM.4"]
+        assert df["turn"].tolist()[:4] == [1, 1, 1, 1]
+        assert df["turn"].tolist()[4:] == [2, 2, 2, 2]
+        assert df[["x", "px", "y", "py"]].notna().all().all()
 
 
 def test_line_to_dataframes_no_monitors(test_line: xt.Line):
     """Test line_to_dataframes raises error when no monitors present."""
-    with pytest.raises(ValueError, match="No ParticlesMonitor found"):
+    with pytest.raises(ValueError, match="No multi-element monitor data found"):
         line_to_dataframes(test_line)
-
-
-def test_line_to_dataframes_particle_loss():
-    """Test line_to_dataframes raises error when particles are lost."""
-    # Create a simple line with one monitor
-    env = xt.Environment()
-    line = xt.Line(
-        elements=[
-            xt.Drift(length=1.0),
-            xt.ParticlesMonitor(num_particles=2, start_at_turn=0, stop_at_turn=2),
-        ],
-        element_names=["drift", "MONITOR"],
-    )
-    env.lines["test"] = line
-
-    # Simulate particle loss: last particle_id is not the max
-    monitor = line["MONITOR"]
-    # Particle 1 lost, last is 0 but max is 1
-    monitor.data.particle_id[:] = [0, 1, 0, 0]
-
-    with pytest.raises(AssertionError, match="Some particles were lost"):
-        line_to_dataframes(line)
-
-
-def test_line_to_dataframes_inconsistent_particles():
-    """Test line_to_dataframes raises error when monitors have different particle counts."""
-    # Create a line with two monitors having different particle counts
-    env = xt.Environment()
-    line = xt.Line(
-        elements=[
-            xt.Drift(length=1.0),
-            xt.ParticlesMonitor(num_particles=2, start_at_turn=0, stop_at_turn=2),
-            xt.Drift(length=1.0),
-            xt.ParticlesMonitor(
-                num_particles=3, start_at_turn=0, stop_at_turn=2
-            ),  # Different count
-        ],
-        element_names=["drift1", "MONITOR1", "drift2", "MONITOR2"],
-    )
-    env.lines["test"] = line
-
-    # Set different numbers of unique particle IDs
-    line["MONITOR1"].data.particle_id[:] = [0, 0, 1, 1]  # 2 unique
-    line["MONITOR2"].data.particle_id[:] = [0, 0, 0, 1, 1, 2]  # 3 unique
-
-    with pytest.raises(ValueError, match="Monitors have different number of particles"):
-        line_to_dataframes(line)

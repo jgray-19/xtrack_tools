@@ -19,6 +19,12 @@ def seq_b1(data_dir: Path) -> Path:
 
 
 @pytest.fixture
+def seq_sps(data_dir: Path) -> Path:
+    """Path to the example SPS sequence file used by tests."""
+    return data_dir / "sequences" / "sps.seq"
+
+
+@pytest.fixture
 def corrector_table(data_dir: Path) -> tfs.TfsDataFrame:
     """Load the corrector table, removing monitor elements."""
     corrector_file = data_dir / "correctors" / "corrector_table.tfs"

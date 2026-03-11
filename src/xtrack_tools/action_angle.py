@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from xtrack_tools.coordinates import create_initial_conditions
 
 if TYPE_CHECKING:
     import xtrack as xt
+
+logger = logging.getLogger(__name__)
 
 
 def _build_coords_from_action_angle(
@@ -36,6 +39,12 @@ def _build_coords_from_action_angle(
             f"{len(action_list)} != {len(angle_list)}"
         )
 
+    logger.info(
+        "Building tracking coordinates from %d action-angle pairs starting at %s",
+        len(action_list),
+        start_marker if start_marker is not None else "first Twiss element",
+    )
+
     tws_df = tws.to_pandas()
     tws_df = tws_df.rename(
         columns={
@@ -51,6 +60,7 @@ def _build_coords_from_action_angle(
     pxs: list[float] = []
     ys: list[float] = []
     pys: list[float] = []
+    start_name = start_marker if start_marker else str(tws_df.index[0])
 
     for i in range(len(action_list)):
         x0 = create_initial_conditions(
@@ -59,11 +69,12 @@ def _build_coords_from_action_angle(
             angle_list,
             tws_df,
             kick_both_planes=kick_both_planes,
-            starting_bpm=start_marker if start_marker else tws_df.index[0],
+            starting_bpm=start_name,
         )
         xs.append(x0["x"])
         pxs.append(x0["px"])
         ys.append(x0["y"])
         pys.append(x0["py"])
 
+    logger.info("Built coordinate arrays for %d particles", len(xs))
     return xs, pxs, ys, pys

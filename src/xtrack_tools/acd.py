@@ -9,7 +9,7 @@ from xobjects import ContextCpu as Context
 
 from .action_angle import _build_coords_from_action_angle
 from .env import create_xsuite_environment
-from .monitors import insert_particle_monitors_at_pattern, process_tracking_data
+from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
 if TYPE_CHECKING:
@@ -55,14 +55,14 @@ def insert_ac_dipole(
     logger.info(f"Qxd/Qx: {qxd_qx}, Qyd/Qx: {qyd_qx}")
     pbeam = line.particle_ref.p0c / 1e9
 
-    line.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(  # type: ignore[attr-defined]
+    line.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(
         plane="x",
         volt=2 * 0.042 * pbeam * abs(qxd_qx) / np.sqrt(180.0 * betxac),
         freq=driven_tunes[0],
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
-    line.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(  # type: ignore[attr-defined]
+    line.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(
         plane="y",
         volt=2 * 0.042 * pbeam * abs(qyd_qx) / np.sqrt(177.0 * betyac),
         freq=driven_tunes[1],
@@ -84,9 +84,8 @@ def prepare_acd_line_with_monitors(
     driven_tunes: list[float],
     lag: float,
     bpm_pattern: str,
-    num_particles: int,
-) -> tuple[xt.Line, int]:
-    """Insert AC dipole and monitors; return monitored line and total turns.
+) -> tuple[xt.Line, int, list[str]]:
+    """Insert AC dipole and prepare multi-element BPM monitoring.
 
     Args:
         line: Base line to copy and modify.
@@ -97,15 +96,21 @@ def prepare_acd_line_with_monitors(
         driven_tunes: Driven tunes (horizontal, vertical).
         lag: Phase lag for the AC dipoles.
         bpm_pattern: Regex pattern for BPM locations.
-        num_particles: Number of particles to track.
 
     Returns:
-        A tuple of ``(monitored_line, total_turns)``.
+        A tuple of ``(tracked_line, total_turns, monitor_names)``.
     """
+    logger.info(
+        "Preparing AC-dipole tracking line with ramp_turns=%d flattop_turns=%d bpm_pattern='%s'",
+        ramp_turns,
+        flattop_turns,
+        bpm_pattern,
+    )
     total_turns = ramp_turns + flattop_turns
     if tws is None:
+        logger.info("No Twiss table provided, computing one from the input line")
         tws = line.twiss(method="4d")
-    ac_line = insert_ac_dipole(
+    tracked_line = insert_ac_dipole(
         line=line,
         tws=tws,
         beam=beam,
@@ -114,14 +119,13 @@ def prepare_acd_line_with_monitors(
         driven_tunes=driven_tunes,
         lag=lag,
     )
-    monitored_line = insert_particle_monitors_at_pattern(
-        line=ac_line,
-        pattern=bpm_pattern,
-        num_turns=total_turns,
-        num_particles=num_particles,
-        inplace=False,
+    monitor_names = get_monitor_names_at_pattern(tracked_line, bpm_pattern)
+    logger.info(
+        "Prepared AC-dipole line with %d total turns and %d monitor points",
+        total_turns,
+        len(monitor_names),
     )
-    return monitored_line, total_turns
+    return tracked_line, total_turns, monitor_names
 
 
 def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float]) -> xt.TwissTable:
@@ -150,14 +154,14 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
         f"Running twiss with AC dipole at {acd_marker} with betx={bet_at_acdipole['betx']}, bety={bet_at_acdipole['bety']}"
     )
 
-    line_acd.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(  # type: ignore[attr-defined]
+    line_acd.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(
         plane="x",
         natural_q=before_acd_tws["qx"] % 1,
         freq=driven_tunes[0],
         beta_at_acdipole=bet_at_acdipole["betx"],
         twiss_mode=True,
     )
-    line_acd.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(  # type: ignore[attr-defined]
+    line_acd.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(
         plane="y",
         natural_q=before_acd_tws["qy"] % 1,
         freq=driven_tunes[1],
@@ -181,6 +185,7 @@ def run_acd_track(
     bpm_pattern: str = r"(?i)bpm.*",
     json_path: Path | None = None,
     add_variance_columns: bool = True,
+    replace_thick_monitors_with_thin: bool = True,
 ) -> tuple[pd.DataFrame, xt.TwissTable, xt.Line]:
     """Run AC dipole tracking for a sequence file and return tracking data.
 
@@ -194,19 +199,28 @@ def run_acd_track(
         bpm_pattern: Regex pattern for BPM locations.
         json_path: Optional JSON cache path.
         add_variance_columns: Whether to add default variance columns to the output.
+        replace_thick_monitors_with_thin: If ``True``, replace thick monitored
+            elements with thin monitor points before tracking. Thin monitors are
+            left unchanged.
 
     Returns:
         Tuple of ``(tracking_df, twiss_table, baseline_line)``.
     """
     if driven_tunes is None:
         driven_tunes = [0.27, 0.322]
+    logger.info(
+        "Running AC-dipole tracking from sequence %s for beam %d with delta_p=%s",
+        sequence_file,
+        beam,
+        delta_p,
+    )
 
     env = create_xsuite_environment(
         json_file=json_path,
         sequence_file=sequence_file,
         seq_name=f"lhcb{beam}",
     )
-    baseline_line: xt.Line = env[f"lhcb{beam}"].copy()  # ty:ignore[not-subscriptable]
+    baseline_line: xt.Line = env[f"lhcb{beam}"].copy()
     tws_input: xt.TwissTable = baseline_line.twiss4d()
 
     qx = float(tws_input.qx % 1)
@@ -215,7 +229,7 @@ def run_acd_track(
     if not (np.isclose(qx, 0.28, atol=1e-3) and np.isclose(qy, 0.31, atol=1e-3)):
         logger.warning(f"Tunes (Qx={qx:.6f}, Qy={qy:.6f}) differ from expected (0.28, 0.31)")
 
-    monitored_line, total_turns = prepare_acd_line_with_monitors(
+    monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
         line=baseline_line,
         tws=tws_input,
         beam=beam,
@@ -224,7 +238,6 @@ def run_acd_track(
         driven_tunes=driven_tunes,
         lag=0.0,
         bpm_pattern=bpm_pattern,
-        num_particles=1,
     )
 
     ctx = Context()
@@ -238,7 +251,13 @@ def run_acd_track(
     )
 
     logger.info(f"Tracking {total_turns} turns with AC dipole")
-    monitored_line.track(particles, num_turns=total_turns, with_progress=True)
+    monitored_line = run_tracking(
+        line=monitored_line,
+        particles=particles,
+        nturns=total_turns,
+        monitor_names=monitor_names,
+        replace_thick_monitors_with_thin=replace_thick_monitors_with_thin,
+    )
 
     tracking_df = process_tracking_data(
         monitored_line, ramp_turns, flattop_turns, add_variance_columns
@@ -262,6 +281,7 @@ def run_ac_dipole_tracking_with_particles(
     kick_both_planes: bool = True,
     start_marker: str | None = None,
     delta_values: list[float] | None = None,
+    replace_thick_monitors_with_thin: bool = True,
 ) -> xt.Line:
     """Track multiple particles with an AC dipole using explicit or action-angle inputs.
 
@@ -280,6 +300,9 @@ def run_ac_dipole_tracking_with_particles(
         kick_both_planes: If ``True``, initialize both planes.
         start_marker: Optional marker name to set as the first element.
         delta_values: Optional momentum offsets per particle.
+        replace_thick_monitors_with_thin: If ``True``, replace thick monitored
+            elements with thin monitor points before tracking. Thin monitors are
+            left unchanged.
 
     Returns:
         The monitored line after tracking.
@@ -289,6 +312,12 @@ def run_ac_dipole_tracking_with_particles(
     """
     if driven_tunes is None:
         driven_tunes = [0.27, 0.322]
+    logger.info(
+        "Running AC-dipole particle tracking with ramp_turns=%d flattop_turns=%d bpm_pattern='%s'",
+        ramp_turns,
+        flattop_turns,
+        bpm_pattern,
+    )
 
     if particle_coords is not None:
         num_particles = len(particle_coords["x"])
@@ -320,7 +349,7 @@ def run_ac_dipole_tracking_with_particles(
     else:
         raise ValueError("Provide particle_coords or both action_list and angle_list")
 
-    monitored_line, total_turns = prepare_acd_line_with_monitors(
+    monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
         line=line,
         tws=tws,
         beam=beam,
@@ -329,7 +358,6 @@ def run_ac_dipole_tracking_with_particles(
         driven_tunes=driven_tunes,
         lag=lag,
         bpm_pattern=bpm_pattern,
-        num_particles=num_particles,
     )
 
     ctx = Context()
@@ -343,6 +371,10 @@ def run_ac_dipole_tracking_with_particles(
     )
 
     logger.info(f"Tracking {num_particles} particles for {total_turns} turns")
-    run_tracking(line=monitored_line, particles=particles, nturns=total_turns)
-
-    return monitored_line
+    return run_tracking(
+        line=monitored_line,
+        particles=particles,
+        nturns=total_turns,
+        monitor_names=monitor_names,
+        replace_thick_monitors_with_thin=replace_thick_monitors_with_thin,
+    )

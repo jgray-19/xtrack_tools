@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    import tfs
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,12 @@ def generate_action_angle_coordinates(
     Returns:
         Tuple of (action_list, angle_list) where both lists have length num_tracks
     """
+    logger.info(
+        "Generating %d action-angle coordinates in range [%g, %g]",
+        num_tracks,
+        action_range[0],
+        action_range[1],
+    )
     # Ensure we get exactly the requested number of tracks
     action_values = np.linspace(action_range[0], action_range[1], num=num_tracks)
     angle_values = np.linspace(0.1, 2 * np.pi, num=num_tracks, endpoint=False)
@@ -48,7 +54,7 @@ def create_initial_conditions(
     ntrk: int,
     action_list: list[float],
     angle_list: list[float],
-    twiss_data: tfs.TfsDataFrame,
+    twiss_data: pd.DataFrame,
     kick_both_planes: bool = True,
     starting_bpm: str | int = 0,
 ) -> dict[str, float]:
@@ -68,7 +74,7 @@ def create_initial_conditions(
     # Direct indexing since action_list and angle_list have the same length
     action = action_list[ntrk]
     angle = angle_list[ntrk]
-    logging.info(f"Track {ntrk}: Using action={action:.2e}, angle={angle:.3f}")
+    logger.debug("Track %d: using action=%.2e angle=%.3f", ntrk, action, angle)
 
     # Get beta and alpha functions at starting point (first BPM)
     first_bpm = starting_bpm
@@ -84,11 +90,20 @@ def create_initial_conditions(
     coy = twiss_data.loc[first_bpm, "y"]
     copy = twiss_data.loc[first_bpm, "py"]
 
-    logging.info(
-        f"Track {ntrk}: Starting at {first_bpm} with beta11={beta11:.2f}, beta22={beta22:.2f}"
+    logger.debug(
+        "Track %d: starting at %s with beta11=%.2f beta22=%.2f",
+        ntrk,
+        first_bpm,
+        beta11,
+        beta22,
     )
-    logging.info(
-        f"Track {ntrk}: Closed orbit x={cox:.2e}, px={copx:.2e}, y={coy:.2e}, py={copy:.2e}"
+    logger.debug(
+        "Track %d: closed orbit x=%.2e px=%.2e y=%.2e py=%.2e",
+        ntrk,
+        cox,
+        copx,
+        coy,
+        copy,
     )
 
     # Compute normalised coordinates from action and angle
@@ -110,10 +125,14 @@ def create_initial_conditions(
             x = cox
             px = copx
 
-    logger.info(
-        f"Track {ntrk}: Created initial conditions with action={action:.2e}, angle={angle:.3f}"
+    logger.debug(
+        "Track %d: created initial conditions x=%.2e px=%.2e y=%.2e py=%.2e",
+        ntrk,
+        x,
+        px,
+        y,
+        py,
     )
-    logger.info(f"Track {ntrk}: x={x:.2e}, px={px:.2e}, y={y:.2e}, py={py:.2e}")
 
     return {
         "x": x,
@@ -136,6 +155,11 @@ def get_kick_plane_category(ntrk: int, kick_both_planes: bool) -> str:
     Returns:
         Kick plane category string ("xy", "x", or "y")
     """
+    logger.debug(
+        "Resolving kick plane category for track %d with kick_both_planes=%s",
+        ntrk,
+        kick_both_planes,
+    )
     if kick_both_planes:
         return "xy"
     return "x" if ntrk % 2 == 0 else "y"
@@ -158,6 +182,9 @@ def validate_coordinate_generation(
     Raises:
         AssertionError: If validation fails
     """
+    logger.info(
+        "Validating coordinate generation for %d tracks", num_tracks
+    )
     assert len(action_list) == num_tracks, (
         f"Expected {num_tracks} action values, got {len(action_list)}."
     )
@@ -167,4 +194,5 @@ def validate_coordinate_generation(
     assert len(action_list) == len(angle_list), (
         f"Action and angle lists must have the same length, got {len(action_list)} and {len(angle_list)}."
     )
+    logger.info("Coordinate generation validation passed")
     return True

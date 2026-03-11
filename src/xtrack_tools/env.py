@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import xpart as xp
 import xtrack as xt
-from xtrack import load_madx_lattice  # ty:ignore[unresolved-import]
+from xtrack import load_madx_lattice
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 def create_xsuite_environment(
-    beam: int | None = None,
     sequence_file: Path | None = None,
     beam_energy: float = 6800,
     seq_name: str | None = None,
@@ -57,15 +56,25 @@ def create_xsuite_environment(
     if not needs_regen:
         needs_regen = sequence_file.stat().st_mtime > json_file.stat().st_mtime
 
+    logger.info(
+        "Preparing xsuite environment for sequence=%s seq_name=%s beam_energy=%s GeV cache=%s",
+        sequence_file,
+        seq_name,
+        beam_energy,
+        json_file,
+    )
+    logger.debug("Environment regeneration required: %s", needs_regen)
+
     if needs_regen:
         if not sequence_file.exists():
             raise FileNotFoundError(f"Sequence file not found: {sequence_file}")
+        logger.info("Generating xsuite environment from MAD-X sequence %s", sequence_file)
         env: xt.Environment = load_madx_lattice(file=sequence_file)
         env.to_json(json_file)
         logger.info(f"xsuite environment saved to {json_file}")
     else:
         logger.info(f"Loading existing xsuite environment from {json_file}")
-        env = xt.Environment.from_json(json_file)  # type: ignore[attr-defined]
+        env = xt.Environment.from_json(json_file)
 
     # MAD-X converts sequence names to lowercase
     seq_name_lower = seq_name.lower()
@@ -73,6 +82,7 @@ def create_xsuite_environment(
         mass=xp.PROTON_MASS_EV,
         energy0=beam_energy * 1e9,
     )
+    logger.info("Environment ready with line '%s'", seq_name_lower)
     return env
 
 
@@ -95,24 +105,23 @@ def _set_corrector_strengths(
     for _, row in corrector_table.iterrows():
         mag_name = row["ename"].lower()
         if strict_set:
-            assert (
-                np.isclose(env[mag_name].knl[0], -row["hkick_old"], atol=1e-10)  # ty:ignore[not-subscriptable]
-                and np.isclose(env[mag_name].ksl[0], row["vkick_old"], atol=1e-10)  # ty:ignore[not-subscriptable]
+            assert np.isclose(env[mag_name].knl[0], -row["hkick_old"], atol=1e-10) and np.isclose(
+                env[mag_name].ksl[0], row["vkick_old"], atol=1e-10
             ), (
                 f"Corrector {row['ename']} has different initial strengths in environment: "
-                f"knl_env={env[mag_name].knl[0]}, expected={-row['hkick_old']}, "  # ty:ignore[not-subscriptable]
-                f"ksl_env={env[mag_name].ksl[0]}, expected={row['vkick_old']}"  # ty:ignore[not-subscriptable]
+                f"knl_env={env[mag_name].knl[0]}, expected={-row['hkick_old']}, "
+                f"ksl_env={env[mag_name].ksl[0]}, expected={row['vkick_old']}"
             )
         knl_str: float = -row["hkick"] if abs(row["hkick"]) > 1e-10 else 0.0
         ksl_str: float = row["vkick"] if abs(row["vkick"]) > 1e-10 else 0.0
-        env.set(mag_name, knl=[knl_str], ksl=[ksl_str])  # type: ignore[attr-defined]
+        env.set(mag_name, knl=[knl_str], ksl=[ksl_str])
+    logger.info("Applied corrector strengths to %d elements", len(corrector_table))
 
 
 def initialise_env(
     matched_tunes: dict[str, float],
     magnet_strengths: dict[str, float],
     corrector_table: tfs.TfsDataFrame,
-    beam: int | None = None,
     sequence_file: Path | None = None,
     beam_energy: float = 6800,
     seq_name: str | None = None,
@@ -139,8 +148,13 @@ def initialise_env(
     Raises:
         ValueError: If tune knob names do not match the expected format.
     """
+    logger.info(
+        "Initialising environment with %d tune knobs, %d magnet strengths, and %d correctors",
+        len(matched_tunes),
+        len(magnet_strengths),
+        len(corrector_table),
+    )
     base_env = create_xsuite_environment(
-        beam=beam,
         sequence_file=sequence_file,
         beam_energy=beam_energy,
         seq_name=seq_name,
@@ -149,17 +163,17 @@ def initialise_env(
     )
 
     for k, v in matched_tunes.items():
-        knob = k[:3] + "." + k[4:]
-        base_env.set(knob, v)  # type: ignore[attr-defined]
-        import re
-
-        if not re.match(r"dq[xy]\.b[12]_op", knob):
-            raise ValueError(f"Unexpected tune knob name format: {knob}")
+        knob = k.lower()
+        if "b1" in k.lower() or "b2" in k.lower():
+            knob = k[:3] + "." + k[4:]
+        logger.debug("Setting tune knob %s to %s", knob, v)
+        base_env.set(knob, v)
 
     for str_name, strength in magnet_strengths.items():
         magnet_name, var = str_name.rsplit(".", 1)
         logger.debug(f"Setting {magnet_name.lower()} {var} to {strength}")
-        base_env.set(magnet_name.lower(), **{var: strength})  # type: ignore[attr-defined]
+        base_env.set(magnet_name.lower(), **{var: strength})
 
     _set_corrector_strengths(base_env, corrector_table, strict_set=strict_set)
+    logger.info("Environment initialisation complete")
     return base_env
