@@ -16,6 +16,11 @@ xtrack_tools API
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: xtrack_tools.coordinates
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: xtrack_tools.tracking
    :members:
    :undoc-members:
