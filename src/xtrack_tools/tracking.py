@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import numpy as np
 from xobjects import ContextCpu as Context
 
 from xtrack_tools.coordinates import create_initial_conditions
@@ -74,7 +75,7 @@ def run_tracking(
     else:
         logger.info("Tracking without multi-element monitor recording")
         tracked_line.track(particles, num_turns=nturns, with_progress=True)
-    if particles.state[0] == 1:
+    if np.all(np.asarray(particles.state) == 1):
         logger.info("Tracking completed successfully")
         return tracked_line
     raise RuntimeError("Tracking failed. Please check the input parameters.")
@@ -88,9 +89,9 @@ def run_tracking_without_ac_dipole(
     particle_coords: dict[str, list[float]] | None = None,
     action_list: list[float] | None = None,
     angle_list: list[float] | None = None,
-    kick_both_planes: bool = True,
+    use_diagonal_kicks: bool = True,
     start_marker: str | None = None,
-    delta_values: list[float] | None = None,
+    deltas: list[float] | float | None = None,
     context: Context | None = None,
     replace_thick_monitors_with_thin: bool = True,
 ) -> xt.Line:
@@ -104,9 +105,9 @@ def run_tracking_without_ac_dipole(
         particle_coords: Explicit particle coordinate arrays.
         action_list: Action values used with ``angle_list`` to build coordinates.
         angle_list: Angle values used with ``action_list`` to build coordinates.
-        kick_both_planes: If ``True``, use action-angle in both planes.
+        use_diagonal_kicks: If ``True``, use action-angle in both planes.
         start_marker: Optional marker name to set as the first element.
-        delta_values: Optional momentum offsets per particle.
+        deltas: Optional momentum offsets per particle.
         context: Optional xobjects context.
         replace_thick_monitors_with_thin: If ``True``, replace thick monitored
             elements with thin monitor points before tracking. Thin monitors are
@@ -131,6 +132,9 @@ def run_tracking_without_ac_dipole(
 
     start_elem = working_line.element_names[0].upper()
     logger.debug("Using default starting element %s", start_elem)
+    if deltas is None:
+        deltas = 0.0
+
 
     if particle_coords is not None:
         num_particles = len(particle_coords["x"])
@@ -138,18 +142,16 @@ def run_tracking_without_ac_dipole(
         pxs = particle_coords["px"]
         ys = particle_coords["y"]
         pys = particle_coords["py"]
-        deltas = particle_coords.get("delta", [0.0] * num_particles)
         logger.info("Using explicit particle coordinates for %d particles", num_particles)
     elif action_list is not None and angle_list is not None:
         xs, pxs, ys, pys = _build_coords_from_action_angle(
             action_list,
             angle_list,
             tws,
-            kick_both_planes,
+            use_diagonal_kicks,
             start_elem,
         )
         num_particles = len(xs)
-        deltas = delta_values if delta_values is not None else [0.0] * num_particles
         logger.info("Built particle coordinates from action-angle data for %d particles", num_particles)
     else:
         raise ValueError("Provide particle_coords or both action_list and angle_list")
@@ -182,7 +184,7 @@ def start_tracking_xsuite_batch(
     action_list: list[float],
     angle_list: list[float],
     twiss_data: tfs.TfsDataFrame,
-    kick_both_planes: bool,
+    use_diagonal_kicks: bool,
     flattop_turns: int,
     progress_interval: int,
     num_tracks: int,
@@ -199,7 +201,7 @@ def start_tracking_xsuite_batch(
         action_list: Action values for initial conditions.
         angle_list: Angle values for initial conditions.
         twiss_data: Twiss data table for coordinate conversion.
-        kick_both_planes: If ``True``, initialize both planes.
+        use_diagonal_kicks: If ``True``, initialize both planes.
         flattop_turns: Number of turns to track.
         progress_interval: Logging interval for batch progress.
         num_tracks: Total number of tracks for progress reporting.
@@ -221,32 +223,45 @@ def start_tracking_xsuite_batch(
     )
     line: xt.Line = env[seq_name]
 
-    x_list: list[float] = []
-    px_list: list[float] = []
-    y_list: list[float] = []
-    py_list: list[float] = []
+    logger.info(
+        "Building initial conditions for batch tracks [%d, %d) using action-angle coordinates",
+        batch_start,
+        batch_end,
+    )
+    actions = np.asarray(action_list[batch_start:batch_end], dtype=float)
+    angles = np.asarray(angle_list[batch_start:batch_end], dtype=float)
+    starting_bpm = line.element_names[0].upper()
 
-    for batch_idx in range(batch_end - batch_start):
-        ntrk = batch_start + batch_idx
-
+    for ntrk in range(batch_start, batch_end):
         if ntrk % progress_interval == 0:
             logger.info(
                 f"Starting tracking command for process {ntrk}/{num_tracks - 1} "
                 f"({ntrk / num_tracks * 100:.1f}%)"
             )
 
-        x0_data: dict[str, int | float] = create_initial_conditions(
-            ntrk,
-            action_list,
-            angle_list,
+    planes = ("xy",) if use_diagonal_kicks else ("x", "y")
+    coord_blocks = [
+        create_initial_conditions(
+            actions,
+            angles,
             twiss_data,
-            kick_both_planes,
-            starting_bpm=line.element_names[0].upper(),
+            kick_plane=plane,
+            starting_bpm=starting_bpm,
         )
-        x_list.append(x0_data["x"])
-        px_list.append(x0_data["px"])
-        y_list.append(x0_data["y"])
-        py_list.append(x0_data["py"])
+        for plane in planes
+    ]
+    x_list = np.concatenate(
+        [np.atleast_1d(np.asarray(block["x"], dtype=float)) for block in coord_blocks]
+    )
+    px_list = np.concatenate(
+        [np.atleast_1d(np.asarray(block["px"], dtype=float)) for block in coord_blocks]
+    )
+    y_list = np.concatenate(
+        [np.atleast_1d(np.asarray(block["y"], dtype=float)) for block in coord_blocks]
+    )
+    py_list = np.concatenate(
+        [np.atleast_1d(np.asarray(block["py"], dtype=float)) for block in coord_blocks]
+    )
 
     num_particles = len(x_list)
     deltas = [true_deltap] * num_particles
@@ -257,10 +272,10 @@ def start_tracking_xsuite_batch(
     ctx = Context(32)
     particles = line.build_particles(
         _context=ctx,
-        x=x_list,
-        px=px_list,
-        y=y_list,
-        py=py_list,
+        x=x_list.tolist(),
+        px=px_list.tolist(),
+        y=y_list.tolist(),
+        py=py_list.tolist(),
         delta=deltas,
     )
 

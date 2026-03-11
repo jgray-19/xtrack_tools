@@ -62,72 +62,78 @@ def twiss_data_multiple_bpms() -> tfs.TfsDataFrame:
     return tfs.TfsDataFrame(df)
 
 
-@pytest.mark.parametrize(
-    "starting_bpm,kick_both_planes",
-    [
-        ("BPM1", True),
-        ("BPM1", False),
-        ("BPM2", True),
-        ("BPM2", False),
-        (0, True),  # Test integer indexing
-        (1, False),
-    ],
-)
+@pytest.mark.parametrize(("starting_bpm", "kick_plane"), [("BPM1", "xy"), ("BPM2", "x"), (0, "xy"), (1, "y")])
 def test_create_initial_conditions_closed_orbit_and_starting_bpm(
-    twiss_data_multiple_bpms: tfs.TfsDataFrame, starting_bpm, kick_both_planes: bool
+    twiss_data_multiple_bpms: tfs.TfsDataFrame, starting_bpm: str | int, kick_plane: str
 ) -> None:
     """Test that coordinates properly include closed orbit and starting_bpm works."""
-    action_list = [1e-6]
-    angle_list = [0.5]
+    action = 1e-6
+    angle = 0.5
 
-    # Determine expected BPM name
     if isinstance(starting_bpm, str):
         expected_bpm = starting_bpm
     else:
         expected_bpm = twiss_data_multiple_bpms.index[starting_bpm]
 
-    # Create Twiss data without closed orbit (all zeros)
     twiss_data_no_co = twiss_data_multiple_bpms.copy()
     twiss_data_no_co.loc[:, ["x", "px", "y", "py"]] = 0.0
 
-    # Get results with and without closed orbit
     result_with_co = create_initial_conditions(
-        0,
-        action_list,
-        angle_list,
+        action,
+        angle,
         twiss_data_multiple_bpms,
-        kick_both_planes=kick_both_planes,
+        kick_plane=kick_plane,
         starting_bpm=starting_bpm,
     )
     result_without_co = create_initial_conditions(
-        0,
-        action_list,
-        angle_list,
+        action,
+        angle,
         twiss_data_no_co,
-        kick_both_planes=kick_both_planes,
+        kick_plane=kick_plane,
         starting_bpm=starting_bpm,
     )
 
-    # Check that function returns all required coordinates
     required_keys = {"x", "px", "y", "py", "t", "pt"}
     assert set(result_with_co.keys()) == required_keys
-    assert all(isinstance(v, float | np.floating) for v in result_with_co.values())
+    assert all(isinstance(v, (float, np.floating)) for v in result_with_co.values())
 
-    # Check that t and pt are zero as per implementation
     assert result_with_co["t"] == 0.0
     assert result_with_co["pt"] == 0.0
 
-    # Extract closed orbit values for the expected BPM
     cox = twiss_data_multiple_bpms.loc[expected_bpm, "x"]
     copx = twiss_data_multiple_bpms.loc[expected_bpm, "px"]
     coy = twiss_data_multiple_bpms.loc[expected_bpm, "y"]
     copy = twiss_data_multiple_bpms.loc[expected_bpm, "py"]
 
-    # Verify: result_with_co = result_without_co + closed_orbit
     assert np.isclose(result_with_co["x"], result_without_co["x"] + cox)
     assert np.isclose(result_with_co["px"], result_without_co["px"] + copx)
     assert np.isclose(result_with_co["y"], result_without_co["y"] + coy)
     assert np.isclose(result_with_co["py"], result_without_co["py"] + copy)
+
+
+def test_create_initial_conditions_vectorises_over_action_angle_pairs(
+    twiss_data_multiple_bpms: tfs.TfsDataFrame,
+) -> None:
+    """Test vectorised action-angle conversion and single-plane suppression."""
+    actions = np.array([1e-6, 4e-6])
+    angles = np.array([0.25, 0.75])
+
+    result = create_initial_conditions(
+        actions,
+        angles,
+        twiss_data_multiple_bpms,
+        kick_plane="x",
+        starting_bpm="BPM2",
+    )
+
+    assert result["t"] == 0.0
+    assert result["pt"] == 0.0
+    assert np.asarray(result["x"]).shape == (2,)
+    assert np.asarray(result["px"]).shape == (2,)
+    assert np.asarray(result["y"]).shape == (2,)
+    assert np.asarray(result["py"]).shape == (2,)
+    assert np.allclose(np.asarray(result["y"]), twiss_data_multiple_bpms.loc["BPM2", "y"])
+    assert np.allclose(np.asarray(result["py"]), twiss_data_multiple_bpms.loc["BPM2", "py"])
 
 
 # Tests for get_kick_plane_category function

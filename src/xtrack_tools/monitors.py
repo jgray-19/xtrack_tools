@@ -232,7 +232,7 @@ def process_tracking_data(
     Args:
         monitored_line: Line with monitor data already collected.
         ramp_turns: Number of initial turns to discard.
-        flattop_turns: Number of turns to keep after the ramp (informational).
+        flattop_turns: Number of turns to keep after the ramp.
         add_variance_columns: Whether to add default variance and kick-plane columns.
 
     Returns:
@@ -245,8 +245,9 @@ def process_tracking_data(
         add_variance_columns,
     )
     tracking_df = line_to_dataframes(monitored_line)[0]
-    tracking_df = tracking_df[tracking_df["turn"] >= ramp_turns].copy()
+    tracking_df = tracking_df[tracking_df["turn"] > ramp_turns].copy()
     tracking_df["turn"] = tracking_df["turn"] - ramp_turns
+    tracking_df = tracking_df[tracking_df["turn"] <= flattop_turns].copy()
     tracking_df = tracking_df.reset_index(drop=True)
 
     if add_variance_columns:

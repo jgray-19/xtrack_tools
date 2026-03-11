@@ -51,31 +51,25 @@ def generate_action_angle_coordinates(
 
 
 def create_initial_conditions(
-    ntrk: int,
-    action_list: list[float],
-    angle_list: list[float],
+    action: float | np.ndarray,
+    angle: float | np.ndarray,
     twiss_data: pd.DataFrame,
-    kick_both_planes: bool = True,
+    kick_plane: str = "xy",
     starting_bpm: str | int = 0,
-) -> dict[str, float]:
+) -> dict[str, float | np.ndarray]:
     """
     Create initial conditions for a specific track from action-angle coordinates.
 
     Args:
-        ntrk: Track number
-        action_list: List of action values (same length as angle_list)
-        angle_list: List of angle values (same length as action_list)
+        action: Action value(s) (scalar or array)
+        angle: Angle value(s) (scalar or array, same shape as action)
         twiss_data: Twiss parameters at starting point
-        kick_both_planes: Whether to kick both x and y planes
+        kick_plane: Plane to kick ("x", "y", or "xy")
+        starting_bpm: Starting BPM name or index
 
     Returns:
         Dictionary with initial coordinates (x, px, y, py, t, pt)
     """
-    # Direct indexing since action_list and angle_list have the same length
-    action = action_list[ntrk]
-    angle = angle_list[ntrk]
-    logger.debug("Track %d: using action=%.2e angle=%.3f", ntrk, action, angle)
-
     # Get beta and alpha functions at starting point (first BPM)
     first_bpm = starting_bpm
     if isinstance(starting_bpm, int):
@@ -90,25 +84,14 @@ def create_initial_conditions(
     coy = twiss_data.loc[first_bpm, "y"]
     copy = twiss_data.loc[first_bpm, "py"]
 
-    logger.debug(
-        "Track %d: starting at %s with beta11=%.2f beta22=%.2f",
-        ntrk,
-        first_bpm,
-        beta11,
-        beta22,
-    )
-    logger.debug(
-        "Track %d: closed orbit x=%.2e px=%.2e y=%.2e py=%.2e",
-        ntrk,
-        cox,
-        copx,
-        coy,
-        copy,
-    )
-
     # Compute normalised coordinates from action and angle
     cos_ang = np.cos(angle)
     sin_ang = np.sin(angle)
+
+    def _closed_orbit_like(value: float) -> float | np.ndarray:
+        if np.ndim(cos_ang) == 0:
+            return value
+        return np.full(np.shape(cos_ang), value, dtype=float)
 
     # Convert to real space coordinates
     x = np.sqrt(action * beta11) * cos_ang + cox
@@ -117,22 +100,12 @@ def create_initial_conditions(
     py = -np.sqrt(action / beta22) * (sin_ang + alfa22 * cos_ang) + copy
 
     # Set coordinates to the closed orbit in the plane not being kicked
-    if kick_both_planes is False:
-        if ntrk % 2 == 0:
-            y = coy
-            py = copy
-        else:
-            x = cox
-            px = copx
-
-    logger.debug(
-        "Track %d: created initial conditions x=%.2e px=%.2e y=%.2e py=%.2e",
-        ntrk,
-        x,
-        px,
-        y,
-        py,
-    )
+    if "y" not in kick_plane:
+        y = _closed_orbit_like(coy)
+        py = _closed_orbit_like(copy)
+    if "x" not in kick_plane:
+        x = _closed_orbit_like(cox)
+        px = _closed_orbit_like(copx)
 
     return {
         "x": x,

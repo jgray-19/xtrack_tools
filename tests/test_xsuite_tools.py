@@ -19,9 +19,10 @@ from xtrack_tools.env import create_xsuite_environment, initialise_env
 from xtrack_tools.monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,
+    process_tracking_data,
     replace_thick_monitors_with_thin_markers,
 )
-from xtrack_tools.tracking import run_tracking
+from xtrack_tools.tracking import run_tracking, run_tracking_without_ac_dipole
 
 BEAM_ENERGY = 6800  # in GeV
 LHCB1_SEQ_NAME = "lhcb1"
@@ -343,6 +344,32 @@ def test_run_tracking(test_line: xt.Line, nturns: int, num_particles: int):
     assert np.asarray(monitor.get("py")).shape == (nturns, num_particles, 4)
 
 
+def test_run_tracking_raises_if_any_particle_is_lost():
+    """Test tracking fails if any particle is lost."""
+    line = xt.Line(
+        elements=[
+            xt.Marker(),
+            xt.LimitRect(min_x=-1e-3, max_x=1e-3, min_y=-1e-3, max_y=1e-3),
+            xt.Drift(length=1.0),
+        ],
+        element_names=["m0", "aper", "d1"],
+    )
+    line.particle_ref = xt.Particles(
+        mass=xp.PROTON_MASS_EV,
+        energy0=450e9,
+    )
+    particles = line.build_particles(
+        x=[0.0, 2e-3],
+        px=[0.0, 0.0],
+        y=[0.0, 0.0],
+        py=[0.0, 0.0],
+        delta=[0.0, 0.0],
+    )
+
+    with pytest.raises(RuntimeError, match="Tracking failed"):
+        run_tracking(line, particles, 1)
+
+
 def test_run_tracking_can_replace_thick_monitors_with_thin():
     """Test replacing thick monitored elements with thin markers before tracking."""
     monitored_line = xt.Line(
@@ -411,6 +438,37 @@ def test_run_tracking_can_replace_thick_monitors_with_thin():
         assert np.isclose(
             tracked_line.get_s_position(inserted_name), original_centres[original_name]
         )
+
+
+def test_run_tracking_without_ac_dipole_doubles_particles_for_split_plane_kicks(
+    test_line: xt.Line, twiss_table: xt.TwissTable
+):
+    """Test one action-angle pair becomes two particles when planes are split."""
+    tracked_line = run_tracking_without_ac_dipole(
+        line=test_line,
+        tws=twiss_table,
+        flattop_turns=2,
+        action_list=[1e-6],
+        angle_list=[0.5],
+        use_diagonal_kicks=False,
+    )
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+
+    x = np.asarray(monitor.get("x"))
+    y = np.asarray(monitor.get("y"))
+    px = np.asarray(monitor.get("px"))
+    py = np.asarray(monitor.get("py"))
+
+    assert x.shape == (2, 2, 4)
+    assert y.shape == (2, 2, 4)
+    assert px.shape == (2, 2, 4)
+    assert py.shape == (2, 2, 4)
+    assert np.max(np.abs(x[:, 0, :])) > 0.0
+    assert np.max(np.abs(py[:, 0, :])) == 0.0
+    assert np.max(np.abs(y[:, 1, :])) > 0.0
+    assert np.max(np.abs(px[:, 1, :])) == 0.0
 
 
 @pytest.mark.slow
@@ -495,3 +553,31 @@ def test_line_to_dataframes_no_monitors(test_line: xt.Line):
     """Test line_to_dataframes raises error when no monitors present."""
     with pytest.raises(ValueError, match="No multi-element monitor data found"):
         line_to_dataframes(test_line)
+
+
+def test_process_tracking_data_removes_ramp_and_keeps_flattop_turns(test_line: xt.Line):
+    """Test ramp turns are removed and remaining turns are renumbered from 1."""
+    monitored_line = test_line.copy()
+    monitor_names = get_monitor_names_at_pattern(monitored_line, "bpm.")
+    particles = monitored_line.build_particles(
+        x=[1e-6],
+        px=[0.0],
+        y=[0.0],
+        py=[0.0],
+        delta=[0.0],
+    )
+    tracked_line = run_tracking(monitored_line, particles, 5, monitor_names=monitor_names)
+
+    tracking_df = process_tracking_data(
+        tracked_line,
+        ramp_turns=2,
+        flattop_turns=3,
+        add_variance_columns=True,
+    )
+
+    assert len(tracking_df) == 12
+    assert tracking_df["turn"].min() == 1
+    assert tracking_df["turn"].max() == 3
+    assert tracking_df["turn"].tolist()[:4] == [1, 1, 1, 1]
+    assert tracking_df["turn"].tolist()[-4:] == [3, 3, 3, 3]
+    assert {"var_x", "var_y", "var_px", "var_py"} <= set(tracking_df.columns)
