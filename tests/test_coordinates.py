@@ -138,7 +138,7 @@ def test_create_initial_conditions_vectorises_over_action_angle_pairs(
 
 # Tests for get_kick_plane_category function
 @pytest.mark.parametrize(
-    "ntrk,kick_both_planes,expected",
+    "ntrk,use_diagonal_kicks,expected",
     [
         (0, True, "xy"),
         (1, True, "xy"),
@@ -149,10 +149,10 @@ def test_create_initial_conditions_vectorises_over_action_angle_pairs(
     ],
 )
 def test_get_kick_plane_category(
-    ntrk: int, kick_both_planes: bool, expected: str
+    ntrk: int, use_diagonal_kicks: bool, expected: str
 ) -> None:
     """Test kick plane category determination."""
-    assert get_kick_plane_category(ntrk, kick_both_planes) == expected
+    assert get_kick_plane_category(ntrk, use_diagonal_kicks) == expected
 
 
 # Tests for validate_coordinate_generation function

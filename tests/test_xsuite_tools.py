@@ -11,18 +11,30 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import tfs
 import xpart as xp
 import xtrack as xt
 
-from xtrack_tools.acd import insert_ac_dipole, run_acd_twiss
+from xtrack_tools.acd import (
+    insert_ac_dipole,
+    prepare_acd_line_with_monitors,
+    run_ac_dipole_tracking_with_particles,
+    run_acd_track,
+    run_acd_twiss,
+)
 from xtrack_tools.env import create_xsuite_environment, initialise_env
 from xtrack_tools.monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,
     process_tracking_data,
     replace_thick_monitors_with_thin_markers,
+    xsuite_tws_to_ng,
 )
-from xtrack_tools.tracking import run_tracking, run_tracking_without_ac_dipole
+from xtrack_tools.tracking import (
+    run_tracking,
+    run_tracking_without_ac_dipole,
+    start_tracking_xsuite_batch,
+)
 
 BEAM_ENERGY = 6800  # in GeV
 LHCB1_SEQ_NAME = "lhcb1"
@@ -87,6 +99,21 @@ def test_line(test_env):
 def twiss_table(test_line):
     """Compute twiss table for test line."""
     return test_line.twiss(method="4d")
+
+
+def _tracking_twiss_dataframe(twiss_table: xt.TwissTable) -> tfs.TfsDataFrame:
+    """Convert an xsuite Twiss table to the column layout expected by tracking helpers."""
+    twiss_df = twiss_table.to_pandas().rename(
+        columns={
+            "betx": "beta11",
+            "bety": "beta22",
+            "alfx": "alfa11",
+            "alfy": "alfa22",
+        }
+    )
+    twiss_df = twiss_df.set_index("name")
+    twiss_df.index = [name.upper() for name in twiss_df.index]
+    return tfs.TfsDataFrame(twiss_df)
 
 
 @pytest.mark.slow
@@ -300,6 +327,40 @@ def test_run_acd_twiss(test_line: xt.Line):
     assert np.isclose(twiss_orig["qy"], twiss_after["qy"], atol=1e-10, rtol=1e-10)
 
 
+def test_prepare_acd_line_with_monitors_computes_twiss_when_missing(test_line: xt.Line):
+    """Test AC-dipole line preparation computes Twiss if none is supplied."""
+    tracked_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
+        line=test_line,
+        tws=None,
+        beam=1,
+        ramp_turns=3,
+        flattop_turns=2,
+        driven_tunes=[0.16, 0.18],
+        lag=0.0,
+        bpm_pattern="bpm.",
+    )
+
+    assert total_turns == 5
+    assert monitor_names == ["bpm.1", "bpm.2", "bpm.3", "bpm.4"]
+    assert "mkach.6l4.b1" in tracked_line.element_names
+    assert "mkacv.6l4.b1" in tracked_line.element_names
+
+
+def test_run_acd_twiss_raises_when_marker_is_missing():
+    """Test run_acd_twiss fails if the AC-dipole marker is absent."""
+    line = xt.Line(
+        elements=[xt.Drift(length=1.0), xt.Marker()],
+        element_names=["drift1", "bpm.1"],
+    )
+    line.particle_ref = xt.Particles(
+        mass=xp.PROTON_MASS_EV,
+        energy0=450e9,
+    )
+
+    with pytest.raises(ValueError, match="AC dipole marker"):
+        run_acd_twiss(line, beam=1, dpp=0.0, driven_tunes=[0.16, 0.18])
+
+
 @pytest.mark.parametrize(
     "nturns, num_particles",
     [
@@ -471,6 +532,41 @@ def test_run_tracking_without_ac_dipole_doubles_particles_for_split_plane_kicks(
     assert np.max(np.abs(px[:, 1, :])) == 0.0
 
 
+def test_run_tracking_without_ac_dipole_uses_explicit_coords_and_start_marker(
+    test_line: xt.Line, twiss_table: xt.TwissTable
+):
+    """Test explicit particle coordinates follow the cycled line order."""
+    tracked_line = run_tracking_without_ac_dipole(
+        line=test_line,
+        tws=twiss_table,
+        flattop_turns=2,
+        particle_coords={
+            "x": [1e-6],
+            "px": [0.0],
+            "y": [2e-6],
+            "py": [0.0],
+        },
+        start_marker="BPM.2",
+    )
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert monitor.obs_names == ["BPM.2", "BPM.3", "BPM.4", "BPM.1"]
+    assert np.asarray(monitor.get("x")).shape == (2, 1, 4)
+
+
+def test_run_tracking_without_ac_dipole_requires_coordinates_or_action_angle(
+    test_line: xt.Line, twiss_table: xt.TwissTable
+):
+    """Test missing coordinate inputs raise ValueError."""
+    with pytest.raises(ValueError, match="Provide particle_coords or both action_list and angle_list"):
+        run_tracking_without_ac_dipole(
+            line=test_line,
+            tws=twiss_table,
+            flattop_turns=2,
+        )
+
+
 @pytest.mark.slow
 def test_replace_thick_monitors_preserves_sps_centres(seq_sps: Path, tmp_path):
     """Test SPS thick monitors are sliced around thin markers at the same centre position."""
@@ -581,3 +677,127 @@ def test_process_tracking_data_removes_ramp_and_keeps_flattop_turns(test_line: x
     assert tracking_df["turn"].tolist()[:4] == [1, 1, 1, 1]
     assert tracking_df["turn"].tolist()[-4:] == [3, 3, 3, 3]
     assert {"var_x", "var_y", "var_px", "var_py"} <= set(tracking_df.columns)
+
+
+def test_replace_thick_monitors_with_thin_markers_raises_on_missing_element(test_line: xt.Line):
+    """Test requesting a missing monitor raises ValueError."""
+    with pytest.raises(ValueError, match="Monitor element 'bpm.99' not found"):
+        replace_thick_monitors_with_thin_markers(test_line.copy(), ["bpm.99"])
+
+
+def test_xsuite_tws_to_ng_converts_columns_and_headers(twiss_table: xt.TwissTable):
+    """Test xsuite Twiss conversion to NG-compatible TFS format."""
+    ng_twiss = xsuite_tws_to_ng(twiss_table)
+
+    assert isinstance(ng_twiss, tfs.TfsDataFrame)
+    assert ng_twiss.index[0].isupper()
+    assert {"beta11", "beta22", "alfa11", "alfa22", "mu1", "mu2"} <= set(ng_twiss.columns)
+    assert np.isclose(ng_twiss.headers["q1"], float(twiss_table.qx % 1))
+    assert np.isclose(ng_twiss.headers["q2"], float(twiss_table.qy % 1))
+
+
+def test_start_tracking_xsuite_batch_doubles_particles_for_split_plane_kicks(
+    test_env, twiss_table: xt.TwissTable
+):
+    """Test batched tracking doubles the particle count for split-plane kicks."""
+    tracked_line = start_tracking_xsuite_batch(
+        env=test_env,
+        batch_start=0,
+        batch_end=1,
+        action_list=[1e-6],
+        angle_list=[0.5],
+        twiss_data=_tracking_twiss_dataframe(twiss_table),
+        use_diagonal_kicks=False,
+        flattop_turns=2,
+        progress_interval=1,
+        num_tracks=1,
+        true_deltap=0.0,
+        seq_name="test_line",
+    )
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert np.asarray(monitor.get("x")).shape == (2, 2, 4)
+    assert np.asarray(monitor.get("y")).shape == (2, 2, 4)
+
+
+def test_run_ac_dipole_tracking_with_particles_supports_explicit_coords(test_line: xt.Line):
+    """Test AC-dipole tracking accepts explicit particle coordinates."""
+    tracked_line = run_ac_dipole_tracking_with_particles(
+        line=test_line,
+        tws=None,
+        beam=1,
+        ramp_turns=2,
+        flattop_turns=3,
+        driven_tunes=None,
+        particle_coords={
+            "x": [1e-6, 2e-6],
+            "px": [0.0, 0.0],
+            "y": [0.0, 1e-6],
+            "py": [0.0, 0.0],
+        },
+    )
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert np.asarray(monitor.get("x")).shape == (5, 2, 4)
+    assert np.asarray(monitor.get("y")).shape == (5, 2, 4)
+
+
+def test_run_ac_dipole_tracking_with_particles_defaults_to_first_line_element(
+    test_line: xt.Line, twiss_table: xt.TwissTable
+):
+    """Test missing start_marker behaves like explicitly selecting the first line element."""
+    implicit_start = run_ac_dipole_tracking_with_particles(
+        line=test_line,
+        tws=twiss_table,
+        beam=1,
+        ramp_turns=1,
+        flattop_turns=2,
+        driven_tunes=[0.16, 0.18],
+        action_list=[1e-6],
+        angle_list=[0.5],
+        use_diagonal_kicks=False,
+        start_marker=None,
+    )
+    explicit_start = run_ac_dipole_tracking_with_particles(
+        line=test_line,
+        tws=twiss_table,
+        beam=1,
+        ramp_turns=1,
+        flattop_turns=2,
+        driven_tunes=[0.16, 0.18],
+        action_list=[1e-6],
+        angle_list=[0.5],
+        use_diagonal_kicks=False,
+        start_marker="drift1",
+    )
+
+    implicit_monitor = implicit_start.record_multi_element_last_track
+    explicit_monitor = explicit_start.record_multi_element_last_track
+    assert implicit_monitor is not None
+    assert explicit_monitor is not None
+    assert implicit_monitor.obs_names == explicit_monitor.obs_names
+    assert np.allclose(np.asarray(implicit_monitor.get("x")), np.asarray(explicit_monitor.get("x")))
+    assert np.allclose(np.asarray(implicit_monitor.get("y")), np.asarray(explicit_monitor.get("y")))
+
+
+@pytest.mark.slow
+def test_run_acd_track_uses_default_driven_tunes_and_returns_flattop_data(seq_b1: Path, tmp_path):
+    """Test run_acd_track default tunes and processed output length."""
+    tracking_df, twiss_table, baseline_line = run_acd_track(
+        sequence_file=seq_b1,
+        delta_p=0.0,
+        ramp_turns=2,
+        flattop_turns=3,
+        driven_tunes=None,
+        beam=1,
+        json_path=tmp_path / "acd_track.json",
+    )
+
+    assert isinstance(tracking_df, pd.DataFrame)
+    assert isinstance(twiss_table, xt.TwissTable)
+    assert isinstance(baseline_line, xt.Line)
+    assert tracking_df["turn"].min() == 1
+    assert tracking_df["turn"].max() == 3
+    assert tracking_df["turn"].nunique() == 3

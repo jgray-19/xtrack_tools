@@ -117,23 +117,23 @@ def create_initial_conditions(
     }
 
 
-def get_kick_plane_category(ntrk: int, kick_both_planes: bool) -> str:
+def get_kick_plane_category(ntrk: int, use_diagonal_kicks: bool) -> str:
     """
     Determine kick plane category for a track.
 
     Args:
         ntrk: Track number
-        kick_both_planes: Whether to kick both planes
+        use_diagonal_kicks: Whether to kick both planes
 
     Returns:
         Kick plane category string ("xy", "x", or "y")
     """
     logger.debug(
-        "Resolving kick plane category for track %d with kick_both_planes=%s",
+        "Resolving kick plane category for track %d with use_diagonal_kicks=%s",
         ntrk,
-        kick_both_planes,
+        use_diagonal_kicks,
     )
-    if kick_both_planes:
+    if use_diagonal_kicks:
         return "xy"
     return "x" if ntrk % 2 == 0 else "y"
 

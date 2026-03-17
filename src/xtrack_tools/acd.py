@@ -143,11 +143,11 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
     Raises:
         ValueError: If the AC dipole marker is not found.
     """
-    line_acd = line.copy()
-    before_acd_tws = line_acd.twiss(method="4d", delta0=dpp)
     acd_marker = f"mkqa.6l4.b{beam}"
     if acd_marker not in line.element_names:
         raise ValueError(f"AC dipole marker '{acd_marker}' not found in the line.")
+    line_acd = line.copy()
+    before_acd_tws = line_acd.twiss(method="4d", delta0=dpp)
 
     bet_at_acdipole = before_acd_tws.rows[acd_marker]
     logger.info(
@@ -278,7 +278,7 @@ def run_ac_dipole_tracking_with_particles(
     particle_coords: dict[str, list[float]] | None = None,
     action_list: list[float] | None = None,
     angle_list: list[float] | None = None,
-    kick_both_planes: bool = True,
+    use_diagonal_kicks: bool = True,
     start_marker: str | None = None,
     delta_values: list[float] | None = None,
     replace_thick_monitors_with_thin: bool = True,
@@ -297,7 +297,7 @@ def run_ac_dipole_tracking_with_particles(
         particle_coords: Explicit coordinates for each particle.
         action_list: Action values for initial conditions.
         angle_list: Angle values for initial conditions.
-        kick_both_planes: If ``True``, initialize both planes.
+        use_diagonal_kicks: If ``True``, initialize both planes.
         start_marker: Optional marker name to set as the first element.
         delta_values: Optional momentum offsets per particle.
         replace_thick_monitors_with_thin: If ``True``, replace thick monitored
@@ -332,8 +332,7 @@ def run_ac_dipole_tracking_with_particles(
             working_line.cycle(name_first_element=start_marker.lower(), inplace=True)
             start_elem = working_line.element_names[0].upper()
         else:
-            bpm_names = [name for name in working_line.element_names if "bpm" in name.lower()]
-            start_elem = bpm_names[0].upper() if bpm_names else None
+            start_elem = working_line.element_names[0].upper()
 
         if tws is None:
             tws = working_line.twiss4d()
@@ -341,7 +340,7 @@ def run_ac_dipole_tracking_with_particles(
             action_list,
             angle_list,
             tws,
-            kick_both_planes,
+            use_diagonal_kicks,
             start_elem,
         )
         num_particles = len(xs)
