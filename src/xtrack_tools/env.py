@@ -166,7 +166,8 @@ def initialise_env(
         knob = k.lower()
         if "b1" in k.lower() or "b2" in k.lower():
             knob = k[:3] + "." + k[4:]
-        logger.debug("Setting tune knob %s to %s", knob, v)
+        old_value = base_env.get(knob)
+        logger.info("Setting tune knob %s to %s from %s", knob, v, old_value)
         base_env.set(knob, v)
 
     for str_name, strength in magnet_strengths.items():
