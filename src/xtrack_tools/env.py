@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def create_xsuite_environment(
     sequence_file: Path | None = None,
-    pc: float = 6800,
+    kinetic_energy: float = 6800,
     seq_name: str | None = None,
     rerun_madx: bool = False,
     json_file: Path | None = None,
@@ -32,7 +32,7 @@ def create_xsuite_environment(
         beam: LHC beam number to resolve the default sequence file, if
             ``sequence_file`` is not provided.
         sequence_file: Path to a MAD-X sequence file. Required if ``beam`` is not set.
-        pc: Beam energy in GeV/c used to set the particle reference.
+        kinetic_energy: Beam kinetic energy in GeV used to set the particle reference.
         seq_name: Sequence name inside the environment; defaults to the file stem.
         rerun_madx: Force regeneration of the JSON cache by rerunning MAD-X.
         json_file: Optional path for the cached JSON representation.
@@ -57,10 +57,10 @@ def create_xsuite_environment(
         needs_regen = sequence_file.stat().st_mtime > json_file.stat().st_mtime
 
     logger.info(
-        "Preparing xsuite environment for sequence=%s seq_name=%s pc=%s GeV cache=%s",
+        "Preparing xsuite environment for sequence=%s seq_name=%s kinetic_energy=%s GeV cache=%s",
         sequence_file,
         seq_name,
-        pc,
+        kinetic_energy,
         json_file,
     )
     logger.debug("Environment regeneration required: %s", needs_regen)
@@ -80,7 +80,7 @@ def create_xsuite_environment(
     seq_name_lower = seq_name.lower()
     env[seq_name_lower].particle_ref = xt.Particles(
         mass=xp.PROTON_MASS_EV,
-        p0c=pc * 1e9,
+        kinetic_energy0=kinetic_energy * 1e9,
     )
     logger.info("Environment ready with line '%s'", seq_name_lower)
     return env
@@ -123,7 +123,7 @@ def initialise_env(
     magnet_strengths: dict[str, float],
     corrector_table: tfs.TfsDataFrame,
     sequence_file: Path | None = None,
-    pc: float = 6800,
+    kinetic_energy: float = 6800,
     seq_name: str | None = None,
     json_file: Path | None = None,
     strict_set=True,
@@ -137,7 +137,7 @@ def initialise_env(
         corrector_table: TFS table with corrector settings.
         beam: LHC beam number to resolve the default sequence file.
         sequence_file: Path to the MAD-X sequence file.
-        pc: Beam energy in GeV/c.
+        kinetic_energy: Beam kinetic energy in GeV.
         seq_name: Sequence name inside the environment.
         json_file: Optional path for cached JSON environment.
         strict_set: If ``True``, validate existing corrector strengths before applying.
@@ -156,7 +156,7 @@ def initialise_env(
     )
     base_env = create_xsuite_environment(
         sequence_file=sequence_file,
-        pc=pc,
+        kinetic_energy=kinetic_energy,
         seq_name=seq_name,
         rerun_madx=False,
         json_file=json_file,
