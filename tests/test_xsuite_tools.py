@@ -129,8 +129,8 @@ def test_create_xsuite_environment(tmp_path, seq_b1):
     assert seq_name_lower in env.lines
     assert json_file.exists()
     line = env.lines[seq_name_lower]
-    assert np.isclose(line.particle_ref.energy0[0], BEAM_ENERGY * 1e9, rtol=1e-10)
-    assert len(line.particle_ref.energy0) == 1
+    assert np.isclose(line.particle_ref.kinetic_energy0[0], BEAM_ENERGY * 1e9, rtol=1e-10)
+    assert len(line.particle_ref.kinetic_energy0) == 1
 
     # Test rerun_madx flag
     mod_time_before = json_file.stat().st_mtime
