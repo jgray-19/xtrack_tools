@@ -151,12 +151,12 @@ def test_create_xsuite_environment(tmp_path, seq_b1):
     # Test custom json and energy
     temp_json = tmp_path / "temp_xsuite.json"
     env4 = create_xsuite_environment(
-        sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, json_file=temp_json, beam_energy=450
+        sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, json_file=temp_json, kinetic_energy=450
     )
     assert seq_name_lower in env4.lines
     line4 = env4.lines[seq_name_lower]
-    assert np.isclose(line4.particle_ref.energy0[0], 450e9, rtol=1e-10)
-    assert len(line4.particle_ref.energy0) == 1
+    assert np.isclose(line4.particle_ref.kinetic_energy0[0], 450e9, rtol=1e-10)
+    assert len(line4.particle_ref.kinetic_energy0) == 1
 
     # Test sequence file newer than json
     mod_time_before = json_file.stat().st_mtime
@@ -204,7 +204,7 @@ def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, 
         magnet_strengths=magnet_strengths,
         corrector_table=corrector_table,
         sequence_file=seq_b1,
-        beam_energy=BEAM_ENERGY,
+        kinetic_energy=BEAM_ENERGY,
         seq_name=LHCB1_SEQ_NAME,
         json_file=json_file,
     )
@@ -573,7 +573,7 @@ def test_replace_thick_monitors_preserves_sps_centres(seq_sps: Path, tmp_path):
     env = create_xsuite_environment(
         sequence_file=seq_sps,
         seq_name="sps",
-        beam_energy=450,
+        kinetic_energy=450,
         json_file=tmp_path / "sps.json",
     )
     line = env.lines["sps"]
