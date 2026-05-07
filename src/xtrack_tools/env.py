@@ -170,10 +170,17 @@ def initialise_env(
         logger.info("Setting tune knob %s to %s from %s", knob, v, old_value)
         base_env.set(knob, v)
 
+    _dknl_to_base = {"dk0l": "k0", "dk1l": "k1", "dk2l": "k2"}
     for str_name, strength in magnet_strengths.items():
         magnet_name, var = str_name.rsplit(".", 1)
-        logger.debug(f"Setting {magnet_name.lower()} {var} to {strength}")
-        base_env.set(magnet_name.lower(), **{var: strength})
+        base_attr = _dknl_to_base.get(var)
+        if base_attr is not None:
+            current = getattr(base_env[magnet_name.lower()], base_attr, 0.0) or 0.0
+            logger.debug(f"Applying delta {strength} to {magnet_name.lower()}.{base_attr} (was {current})")
+            base_env.set(magnet_name.lower(), **{base_attr: current + strength})
+        else:
+            logger.debug(f"Setting {magnet_name.lower()} {var} to {strength}")
+            base_env.set(magnet_name.lower(), **{var: strength})
 
     _set_corrector_strengths(base_env, corrector_table, strict_set=strict_set)
     logger.info("Environment initialisation complete")
