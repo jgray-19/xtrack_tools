@@ -55,6 +55,7 @@ def run_tracking(
     )
     tracked_line = line.copy()
     monitor_name_aliases: dict[str, str] | None = None
+    show_progress = logger.isEnabledFor(logging.INFO)
     if monitor_names:
         if replace_thick_monitors_with_thin:
             logger.info("Checking whether requested monitor elements need thick-to-thin conversion")
@@ -66,7 +67,7 @@ def run_tracking(
         tracked_line.track(
             particles,
             num_turns=nturns,
-            with_progress=True,
+            with_progress=show_progress,
             multi_element_monitor_at=monitor_names,
         )
         _normalise_recorded_multi_element_monitor_names(
@@ -74,7 +75,7 @@ def run_tracking(
         )
     else:
         logger.info("Tracking without multi-element monitor recording")
-        tracked_line.track(particles, num_turns=nturns, with_progress=True)
+        tracked_line.track(particles, num_turns=nturns, with_progress=show_progress)
     if np.all(np.asarray(particles.state) == 1):
         logger.info("Tracking completed successfully")
         return tracked_line
