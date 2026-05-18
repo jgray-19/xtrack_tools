@@ -218,7 +218,7 @@ def run_kicker_track(
         raise ValueError(f"tkicker element '{tkicker_name}' not found in line '{seq}'.")
 
     tws: xt.TwissTable = baseline_line.twiss(method="4d")
-    frev = float(1.0 / tws["t_rev0"])
+    frev = float(1.0 / tws.t_rev0)
     s_kicker = float(baseline_line.get_s_position(tkicker_name))
     logger.info("tkicker '%s' at s=%.3f m, frev=%.6f Hz", tkicker_name, s_kicker, frev)
 
@@ -231,8 +231,8 @@ def run_kicker_track(
 
     start_elem = kicked_line.element_names[0].upper()
     co_row = tws.rows[start_elem] if start_elem in tws.name else tws.rows[0]
-    x0, px0 = float(co_row["x"]), float(co_row["px"])
-    y0, py0 = float(co_row["y"]), float(co_row["py"])
+    x0, px0 = float(co_row["x"][0]), float(co_row["px"][0])
+    y0, py0 = float(co_row["y"][0]), float(co_row["py"][0])
     logger.info("Closed orbit at '%s': x=%g px=%g y=%g py=%g", start_elem, x0, px0, y0, py0)
 
     ctx = Context()
