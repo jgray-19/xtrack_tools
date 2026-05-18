@@ -28,7 +28,8 @@ jobs:
         run: |
           python -m pytest --cov=xtrack_tools --cov-branch --cov-report=xml
 
-      - name: Upload coverage reports to codecov
-        uses: codecov/codecov-action@v5
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
