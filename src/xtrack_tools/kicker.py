@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Literal
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xtrack as xt
 from xobjects import ContextCpu as Context
@@ -80,6 +79,8 @@ def plot_kicker_tracking(
             kick fires, used to position the red vertical line.
         save_path: File path to save the figure, or ``None`` to skip saving.
     """
+    # Only import matplotlib here since it's only needed for this optional plotting function
+    import matplotlib.pyplot as plt
     import pandas as pd
 
     circumference = float(tws["circumference"])
