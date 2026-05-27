@@ -70,6 +70,15 @@ def create_xsuite_environment(
             raise FileNotFoundError(f"Sequence file not found: {sequence_file}")
         logger.info("Generating xsuite environment from MAD-X sequence %s", sequence_file)
         env: xt.Environment = load_madx_lattice(file=sequence_file)
+        # Loop through all the elements, if it's an rbend convert the straight length to the arc length -> Disabled needs to be tested
+        # for name, elm in env[seq_name]._element_dict.items():
+        #     if isinstance(elm, xt.RBend):
+        #         old_length = env[seq_name][name].length
+        #         env[seq_name].set("length_straight", elm.length)
+        #         new_length = env[seq_name][name].length
+        #         logger.warning(
+        #             f"Updated RBend {name}: length_straight {old_length} -> {new_length}, diff {new_length - old_length}"
+        #         )
         env.to_json(json_file)
         logger.info(f"xsuite environment saved to {json_file}")
     else:
@@ -83,6 +92,27 @@ def create_xsuite_environment(
         kinetic_energy0=kinetic_energy * 1e9,
     )
     logger.info("Environment ready with line '%s'", seq_name_lower)
+
+    # For small machines (bends with large bending angles) it is more appropriate to
+    # switch to the `full` model for the edge
+    env[seq_name_lower].configure_bend_model(core="bend-kick-bend", edge="full")
+
+    # It is also possible to switch from the expanded drift to the exact one
+    env[seq_name_lower].configure_drift_model(model="exact")
+
+    # Loop through all the elements, if it's a multipole, then set the integrator to "yoshida4" and the model to "mat-kick-mat"
+    for name, elm in env[seq_name_lower]._element_dict.items():
+        if isinstance(elm, xt.Multipole):
+            env[seq_name_lower].set(name, integrator="yoshida4", model="mat-kick-mat")
+            logger.debug(
+                f"Updated Multipole {name}: integrator set to yoshida4 and model set to mat-kick-mat"
+            )
+        if isinstance(elm, xt.Quadrupole):
+            env[seq_name_lower].set(name, integrator="yoshida4", model="mat-kick-mat")
+            logger.debug(
+                f"Updated Quadrupole {name}: integrator set to yoshida4 and model set to mat-kick-mat"
+            )
+
     return env
 
 

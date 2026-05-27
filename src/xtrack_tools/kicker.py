@@ -40,12 +40,13 @@ def _insert_exciter_at(
     start_turn: int,
 ) -> None:
     """Insert an ``xt.Exciter`` with a single sample at position s."""
+    # Let xtrack derive the duration from the single provided sample. Passing a
+    # sub-sample duration truncates nduration to zero and disables the kick.
     exciter = xt.Exciter(
         samples=[1.0],
-        sampling_frequency=frev*1e6,
+        sampling_frequency=frev,
         frev=frev,
         start_turn=start_turn,
-        duration=1/frev/2, # half a revolution, to ensure the kick is applied for exactly one turn
         knl=[knl],
         ksl=[ksl],
     )
