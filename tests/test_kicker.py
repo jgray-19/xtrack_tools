@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ from xtrack_tools.kicker import plot_kicker_tracking, run_free_track_from_kick, 
 # SEQ_FILE = Path(__file__).parent / "data" / "sequences" / "sps.seq"
 # TKICKER = "adkcv.32171"  # first SPS ADK tkicker
 
+IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 SEQ_FILE = Path(__file__).parent / "data" / "sequences" / "lhcb1.seq"
 TKICKER = "mkqa.6l4.b1"
 BPM_AFTER_KICKER = "bpmya.5l4.b1"
@@ -113,7 +115,7 @@ def test_single_kick(kicker_result):
         )
 
 
-@pytest.mark.skip(reason="Visual check only")
+@pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="No need to run plot tests in Github Actions.")
 def test_kicker_plot(kicker_result):
     """Visual check: particle on closed orbit for KICK_TURN turns, then oscillating."""
     df, tws, _, s_kicker, kick_turn = kicker_result

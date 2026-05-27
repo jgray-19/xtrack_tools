@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from xtrack_tools.kicker import plot_kicker_tracking, run_kicker_track
 
+IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 SEQ_FILE = Path(__file__).parent / "data" / "sequences" / "psb3_saved.seq"
 TKICKER = "br3.kqm12l1"
 NTURNS = 10
@@ -49,6 +51,7 @@ def test_psb_kicker_px_displaced(psb_kicker_result):
     )
 
 
+@pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="No need to run plot tests in Github Actions.")
 def test_psb_kicker_plot(psb_kicker_result, tmp_path: Path):
     """The PSB kicker tracking plot should render to a PNG file."""
     df, tws, _, s_kicker, kick_turn = psb_kicker_result
