@@ -8,6 +8,7 @@ import numpy as np
 from xtrack_tools.coordinates import create_initial_conditions
 
 if TYPE_CHECKING:
+    import pandas as pd
     import xtrack as xt
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _build_coords_from_action_angle(
     action_list: list[float],
     angle_list: list[float],
-    tws: xt.TwissTable,
+    tws: xt.TwissTable | pd.DataFrame,
     use_diagonal_kicks: bool,
     start_marker: str | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -25,7 +26,7 @@ def _build_coords_from_action_angle(
     Args:
         action_list: Action values for each particle.
         angle_list: Angle values for each particle.
-        tws: Twiss table used for coordinate conversion.
+        tws: Twiss table or MAD-NG-style DataFrame used for coordinate conversion.
         use_diagonal_kicks: If ``True``, kick both planes at the same time, otherwise separate kicks for x and y.
         start_marker: Optional starting element name in the Twiss table.
 
@@ -47,16 +48,19 @@ def _build_coords_from_action_angle(
         start_marker if start_marker is not None else "first Twiss element",
     )
 
-    tws_df = tws.to_pandas()
-    tws_df = tws_df.rename(
-        columns={
-            "betx": "beta11",
-            "bety": "beta22",
-            "alfx": "alfa11",
-            "alfy": "alfa22",
-        }
-    )
-    tws_df.set_index("name", inplace=True)
+    if hasattr(tws, "to_pandas"):
+        tws_df = tws.to_pandas()
+        tws_df = tws_df.rename(
+            columns={
+                "betx": "beta11",
+                "bety": "beta22",
+                "alfx": "alfa11",
+                "alfy": "alfa22",
+            }
+        )
+        tws_df.set_index("name", inplace=True)
+    else:
+        tws_df = tws.copy()
     tws_df.index = [name.upper() for name in tws_df.index]
     start_name = start_marker if start_marker else str(tws_df.index[0])
     actions = np.asarray(action_list, dtype=float)

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import xpart as xp
 import xtrack as xt
-from xtrack import load_madx_lattice
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,16 +68,7 @@ def create_xsuite_environment(
         if not sequence_file.exists():
             raise FileNotFoundError(f"Sequence file not found: {sequence_file}")
         logger.info("Generating xsuite environment from MAD-X sequence %s", sequence_file)
-        env: xt.Environment = load_madx_lattice(file=sequence_file)
-        # Loop through all the elements, if it's an rbend convert the straight length to the arc length -> Disabled needs to be tested
-        # for name, elm in env[seq_name]._element_dict.items():
-        #     if isinstance(elm, xt.RBend):
-        #         old_length = env[seq_name][name].length
-        #         env[seq_name].set("length_straight", elm.length)
-        #         new_length = env[seq_name][name].length
-        #         logger.warning(
-        #             f"Updated RBend {name}: length_straight {old_length} -> {new_length}, diff {new_length - old_length}"
-        #         )
+        env: xt.Environment = xt.load(file=sequence_file, _rbend_correct_k0=True, format="madx")
         env.to_json(json_file)
         logger.info(f"xsuite environment saved to {json_file}")
     else:
@@ -95,7 +85,7 @@ def create_xsuite_environment(
 
     # For small machines (bends with large bending angles) it is more appropriate to
     # switch to the `full` model for the edge
-    env[seq_name_lower].configure_bend_model(core="bend-kick-bend", edge="full")
+    env[seq_name_lower].configure_bend_model(core="adaptive", edge="full", integrator="yoshida4")
 
     # It is also possible to switch from the expanded drift to the exact one
     env[seq_name_lower].configure_drift_model(model="exact")

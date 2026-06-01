@@ -555,6 +555,25 @@ def test_run_tracking_without_ac_dipole_uses_explicit_coords_and_start_marker(
     assert np.asarray(monitor.get("x")).shape == (2, 1, 4)
 
 
+def test_run_tracking_without_ac_dipole_accepts_madng_style_twiss_dataframe(
+    test_line: xt.Line, twiss_table: xt.TwissTable
+):
+    """Test action-angle tracking accepts a MAD-NG-style Twiss DataFrame directly."""
+    tracked_line = run_tracking_without_ac_dipole(
+        line=test_line,
+        tws=_tracking_twiss_dataframe(twiss_table),
+        flattop_turns=2,
+        action_list=[1e-6],
+        angle_list=[0.5],
+        use_diagonal_kicks=False,
+    )
+
+    monitor = tracked_line.record_multi_element_last_track
+    assert monitor is not None
+    assert np.asarray(monitor.get("x")).shape == (2, 2, 4)
+    assert np.asarray(monitor.get("y")).shape == (2, 2, 4)
+
+
 def test_run_tracking_without_ac_dipole_requires_coordinates_or_action_angle(
     test_line: xt.Line, twiss_table: xt.TwissTable
 ):

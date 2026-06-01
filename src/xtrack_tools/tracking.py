@@ -18,6 +18,7 @@ from .monitors import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    import pandas as pd
     import tfs
     import xtrack as xt
 
@@ -84,7 +85,7 @@ def run_tracking(
 
 def run_tracking_without_ac_dipole(
     line: xt.Line,
-    tws: xt.TwissTable,
+    tws: xt.TwissTable | pd.DataFrame,
     flattop_turns: int,
     bpm_pattern: str = r"bpm.*[^k]",
     particle_coords: dict[str, list[float]] | None = None,
@@ -100,7 +101,8 @@ def run_tracking_without_ac_dipole(
 
     Args:
         line: Base line to copy and track.
-        tws: Twiss data used to convert action-angle to coordinates.
+        tws: xsuite Twiss table or MAD-NG-normalised DataFrame used to
+            convert action-angle to coordinates.
         flattop_turns: Number of turns to track at flat top.
         bpm_pattern: Regex pattern for BPM element names.
         particle_coords: Explicit particle coordinate arrays.
