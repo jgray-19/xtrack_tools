@@ -23,6 +23,7 @@ from xtrack_tools.acd import (
     run_acd_twiss,
 )
 from xtrack_tools.env import create_xsuite_environment, initialise_env
+from xtrack_tools.line import get_element_s_position
 from xtrack_tools.monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,
@@ -270,9 +271,9 @@ def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
     assert acdv.freq == driven_tunes[1]
 
     # Check that they are at the same position as the marker
-    marker_pos = new_line.get_s_position(acd_marker)
-    acdh_pos = new_line.get_s_position(acdh_name)
-    acdv_pos = new_line.get_s_position(acdv_name)
+    marker_pos = get_element_s_position(new_line, acd_marker)
+    acdh_pos = get_element_s_position(new_line, acdh_name)
+    acdv_pos = get_element_s_position(new_line, acdv_name)
     assert acdh_pos == marker_pos
     assert acdv_pos == marker_pos
 
@@ -289,6 +290,12 @@ def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
     pd_twiss.reset_index(drop=True, inplace=True)
 
     pd.testing.assert_frame_equal(twiss_table.to_pandas(), pd_twiss, check_exact=False, rtol=1e-10)
+
+
+def test_get_element_s_position_raises_for_missing_element(test_line: xt.Line):
+    """Test requesting an unknown element position raises ValueError."""
+    with pytest.raises(ValueError, match="Element 'missing.bpm' not found in the line."):
+        get_element_s_position(test_line, "missing.bpm")
 
 
 def test_run_acd_twiss(test_line: xt.Line):
@@ -497,7 +504,7 @@ def test_run_tracking_can_replace_thick_monitors_with_thin():
     ):
         assert isinstance(tracked_line[inserted_name]._get_viewed_object(), xt.Marker)
         assert np.isclose(
-            tracked_line.get_s_position(inserted_name), original_centres[original_name]
+            get_element_s_position(tracked_line, inserted_name), original_centres[original_name]
         )
 
 
@@ -613,7 +620,7 @@ def test_replace_thick_monitors_preserves_sps_centres(seq_sps: Path, tmp_path):
         working_line, thick_monitor_names
     )
     inserted_positions = np.asarray(
-        [working_line.get_s_position(thin_name) for thin_name in thin_names], dtype=float
+        [get_element_s_position(working_line, thin_name) for thin_name in thin_names], dtype=float
     )
     twiss_after = working_line.twiss(method="4d")
     thin_twiss_positions = np.asarray([twiss_after["s", thin_name] for thin_name in thin_names], dtype=float)

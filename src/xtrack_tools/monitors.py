@@ -9,6 +9,8 @@ import pandas as pd
 import tfs
 from turn_by_turn import convert_to_tbt
 
+from .line import get_element_s_position
+
 if TYPE_CHECKING:
     import xtrack as xt
     from turn_by_turn.structures import TbtData
@@ -92,6 +94,7 @@ def replace_thick_monitors_with_thin_markers(
     alias_map: dict[str, str] = {}
     insertions = []
     converted_count = 0
+    line_table = line.get_table()
 
     for monitor_name in monitor_names:
         if monitor_name not in line.element_names:
@@ -103,7 +106,7 @@ def replace_thick_monitors_with_thin_markers(
             continue
 
         thin_name = _next_available_element_name(line, f"{monitor_name}__thin")
-        monitor_center = float(line.get_s_position(monitor_name)) + 0.5 * element_length
+        monitor_center = get_element_s_position(line, monitor_name, table=line_table) + 0.5 * element_length
         line.env.elements[thin_name] = xt.Marker()
         insertions.append(line.env.place(thin_name, at=monitor_center))
         thin_monitor_names.append(thin_name)

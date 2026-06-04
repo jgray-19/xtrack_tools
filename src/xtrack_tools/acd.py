@@ -9,6 +9,7 @@ from xobjects import ContextCpu as Context
 
 from .action_angle import _build_coords_from_action_angle
 from .env import create_xsuite_environment
+from .line import get_element_s_position
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -69,7 +70,7 @@ def insert_ac_dipole(
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
-    placement = line.get_s_position(acd_marker)
+    placement = get_element_s_position(line, acd_marker)
     line.insert(f"mkacv.6l4.b{beam}", at=placement)
     line.insert(f"mkach.6l4.b{beam}", at=placement)
     return line
@@ -169,7 +170,7 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
         twiss_mode=True,
     )
 
-    placement = line_acd.get_s_position(acd_marker)
+    placement = get_element_s_position(line_acd, acd_marker)
     line_acd.insert(f"mkach.6l4.b{beam}", at=placement)
     line_acd.insert(f"mkacv.6l4.b{beam}", at=placement)
     return line_acd.twiss(method="4d", delta0=dpp)

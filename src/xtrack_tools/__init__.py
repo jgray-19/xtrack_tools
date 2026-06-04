@@ -13,6 +13,7 @@ from .env import (
     create_xsuite_environment,
     initialise_env,
 )
+from .line import get_element_s_position
 from .monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,
@@ -33,6 +34,7 @@ __all__ = [
     "run_acd_twiss",
     "create_xsuite_environment",
     "initialise_env",
+    "get_element_s_position",
     "get_monitor_names_at_pattern",
     "line_to_dataframes",
     "process_tracking_data",
