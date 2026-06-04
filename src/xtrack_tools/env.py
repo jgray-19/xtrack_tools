@@ -14,6 +14,40 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_SMALL_MACHINE_LENGTH_THRESHOLD_M = 1_000.0
+_SMALL_MACHINE_NUM_MULTIPOLE_KICKS = 1
+_LARGE_MACHINE_NUM_MULTIPOLE_KICKS = 10
+
+
+def _configure_line_models(line: xt.Line) -> None:
+    """Configure bend and drift models from the machine length."""
+    machine_length = float(line.get_length())
+    if machine_length < _SMALL_MACHINE_LENGTH_THRESHOLD_M:
+        bend_core = "bend-kick-bend"
+        bend_integrator = "uniform"
+        num_multipole_kicks = _SMALL_MACHINE_NUM_MULTIPOLE_KICKS
+    else:
+        bend_core = "rot-kick-rot"
+        bend_integrator = "yoshida4"
+        num_multipole_kicks = _LARGE_MACHINE_NUM_MULTIPOLE_KICKS
+
+    logger.info(
+        "Configuring xsuite line '%s' for machine length %.3f m with bend core=%s integrator=%s kicks=%d",
+        getattr(line, "name", "<unnamed>"),
+        machine_length,
+        bend_core,
+        bend_integrator,
+        num_multipole_kicks,
+    )
+    line.configure_bend_model(
+        core=bend_core,
+        edge="full",
+        integrator=bend_integrator,
+        num_multipole_kicks=num_multipole_kicks,
+    )
+    line.configure_drift_model(model="exact")
+
+
 def create_xsuite_environment(
     sequence_file: Path | None = None,
     kinetic_energy: float = 6800,
@@ -83,12 +117,7 @@ def create_xsuite_environment(
     )
     logger.info("Environment ready with line '%s'", seq_name_lower)
 
-    # For small machines (bends with large bending angles) it is more appropriate to
-    # switch to the `full` model for the edge
-    env[seq_name_lower].configure_bend_model(core="adaptive", edge="full", integrator="yoshida4")
-
-    # It is also possible to switch from the expanded drift to the exact one
-    env[seq_name_lower].configure_drift_model(model="exact")
+    _configure_line_models(env[seq_name_lower])
 
     # Loop through all the elements, if it's a multipole, then set the integrator to "yoshida4" and the model to "mat-kick-mat"
     for name, elm in env[seq_name_lower]._element_dict.items():
