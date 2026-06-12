@@ -9,7 +9,7 @@ from xobjects import ContextCpu as Context
 
 from .action_angle import _build_coords_from_action_angle
 from .env import create_xsuite_environment
-from .line import get_element_s_centre
+from .line import get_element_s_centre, resolve_element_name
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -21,6 +21,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def state_marker_names(acd_marker: str) -> tuple[str, str]:
+    """Return the ``(before, after)`` state-marker names for an AC-dipole marker."""
+    return f"{acd_marker}_before", f"{acd_marker}_after"
+
+
 def insert_ac_dipole(
     line: xt.Line,
     tws: xt.TwissTable,
@@ -29,6 +34,7 @@ def insert_ac_dipole(
     total_turns: int,
     driven_tunes: list[float],
     lag: float = 0.0,
+    insert_state_markers: bool = False,
 ) -> xt.Line:
     """Insert horizontal and vertical AC dipoles at the AC dipole marker.
 
@@ -40,8 +46,10 @@ def insert_ac_dipole(
         total_turns: Total tracking turns at flat top.
         driven_tunes: Driven tunes (horizontal, vertical).
         lag: Phase lag for the AC dipoles.
-        acd_marker: Optional name of the marker element at which to place the AC dipoles.
-        If not provided, defaults to ``mkqa.6l4.b1``, which is the standard LHC AC dipole marker.
+        insert_state_markers: If ``True``, also insert zero-length markers
+            ``{acd_marker}_before`` and ``{acd_marker}_after`` a tiny step (1e-8 m)
+            up- and downstream of the AC-dipole kicks, so they unambiguously
+            record the true pre-kick and post-kick momenta.
 
     Returns:
         A new line with AC dipole elements inserted.
@@ -74,6 +82,14 @@ def insert_ac_dipole(
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
     placement = get_element_s_centre(line, acd_marker)
+    if insert_state_markers:
+        before_name, after_name = state_marker_names(acd_marker)
+        line.env.elements[before_name] = xt.Marker()
+        line.env.elements[after_name] = xt.Marker()
+        # Offset the markers by a tiny step so they sit unambiguously up- and
+        # downstream of the kicks (a 1e-8 m drift is negligible for the state).
+        line.insert(before_name, at=placement - 1e-8)
+        line.insert(after_name, at=placement + 1e-8)
     line.insert(f"{acd_marker}_x", at=placement)
     line.insert(f"{acd_marker}_y", at=placement)
     return line
@@ -88,6 +104,7 @@ def prepare_acd_line_with_monitors(
     driven_tunes: list[float],
     lag: float,
     bpm_pattern: str,
+    insert_state_markers: bool = False,
 ) -> tuple[xt.Line, int, list[str]]:
     """Insert AC dipole and prepare multi-element BPM monitoring.
 
@@ -122,8 +139,11 @@ def prepare_acd_line_with_monitors(
         total_turns=total_turns,
         driven_tunes=driven_tunes,
         lag=lag,
+        insert_state_markers=insert_state_markers,
     )
     monitor_names = get_monitor_names_at_pattern(tracked_line, bpm_pattern)
+    if insert_state_markers:
+        monitor_names = [*monitor_names, *state_marker_names(acd_marker)]
     logger.info(
         "Prepared AC-dipole line with %d total turns and %d monitor points",
         total_turns,
@@ -193,6 +213,7 @@ def run_acd_track(
     json_path: Path | None = None,
     add_variance_columns: bool = True,
     replace_thick_monitors_with_thin: bool = True,
+    state_markers: bool = False,
 ) -> tuple[pd.DataFrame, xt.TwissTable, xt.Line]:
     """Run AC dipole tracking for a sequence file and return tracking data.
 
@@ -212,6 +233,9 @@ def run_acd_track(
         replace_thick_monitors_with_thin: If ``True``, replace thick monitored
             elements with thin monitor points before tracking. Thin monitors are
             left unchanged.
+        state_markers: If ``True``, insert and monitor ``{acd_marker}_before`` and
+            ``{acd_marker}_after`` markers bracketing the AC-dipole kicks, so the
+            tracked data carries the true pre-kick and post-kick momenta.
 
     Returns:
         Tuple of ``(tracking_df, twiss_table, monitored_line)``.
@@ -221,6 +245,7 @@ def run_acd_track(
     logger.info(
         "Running AC-dipole tracking from sequence %s for element %s with delta_p=%s, using acd_marker='%s' with driven_tunes=%s",
         sequence_file,
+        acd_marker,
         delta_p,
         acd_marker,
         driven_tunes,
@@ -233,6 +258,7 @@ def run_acd_track(
         seq_name=sequence_name,
     )
     baseline_line: xt.Line = env[sequence_name].copy()
+    acd_marker = resolve_element_name(baseline_line, acd_marker)
     tws_input: xt.TwissTable = baseline_line.twiss4d()
 
     qx = float(tws_input.qx % 1)
@@ -253,6 +279,7 @@ def run_acd_track(
         driven_tunes=driven_tunes,
         lag=0.0,
         bpm_pattern=bpm_pattern,
+        insert_state_markers=state_markers,
     )
 
     ctx = Context()
@@ -297,6 +324,7 @@ def run_ac_dipole_tracking_with_particles(
     start_marker: str | None = None,
     delta_values: list[float] | None = None,
     replace_thick_monitors_with_thin: bool = True,
+    state_markers: bool = False,
 ) -> xt.Line:
     """Track multiple particles with an AC dipole using explicit or action-angle inputs.
 
@@ -319,6 +347,9 @@ def run_ac_dipole_tracking_with_particles(
         replace_thick_monitors_with_thin: If ``True``, replace thick monitored
             elements with thin monitor points before tracking. Thin monitors are
             left unchanged.
+        state_markers: If ``True``, insert and monitor ``{acd_marker}_before`` and
+            ``{acd_marker}_after`` markers bracketing the AC-dipole kicks, so the
+            tracked data carries the true pre-kick and post-kick momenta.
 
     Returns:
         The monitored line after tracking.
@@ -328,6 +359,7 @@ def run_ac_dipole_tracking_with_particles(
     """
     if driven_tunes is None:
         driven_tunes = [0.27, 0.322]
+    acd_marker = resolve_element_name(line, acd_marker)
     logger.info(
         "Running AC-dipole particle tracking with ramp_turns=%d flattop_turns=%d bpm_pattern='%s'",
         ramp_turns,
@@ -373,6 +405,7 @@ def run_ac_dipole_tracking_with_particles(
         driven_tunes=driven_tunes,
         lag=lag,
         bpm_pattern=bpm_pattern,
+        insert_state_markers=state_markers,
     )
 
     ctx = Context()
