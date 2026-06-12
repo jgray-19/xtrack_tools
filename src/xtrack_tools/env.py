@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 import numpy as np
 import xpart as xp
 import xtrack as xt
+from packaging.version import Version
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,30 +24,42 @@ _LARGE_MACHINE_NUM_MULTIPOLE_KICKS = 10
 def _configure_line_models(line: xt.Line) -> None:
     """Configure bend and drift models from the machine length."""
     machine_length = float(line.get_length())
-    if machine_length < _SMALL_MACHINE_LENGTH_THRESHOLD_M:
-        bend_core = "bend-kick-bend"
-        bend_integrator = "uniform"
-        num_multipole_kicks = _SMALL_MACHINE_NUM_MULTIPOLE_KICKS
-    else:
-        bend_core = "rot-kick-rot"
-        bend_integrator = "yoshida4"
-        num_multipole_kicks = _LARGE_MACHINE_NUM_MULTIPOLE_KICKS
+    # This only works with xtrack version 0.105.1 or later, which makes the bend-kick-bend model stable even small bending angles.
+    xtrack_version = Version(version("xtrack"))
+    if xtrack_version < Version("0.105.1"):
+        raise RuntimeError(
+            f"xtrack version 0.105.1 or later is required for stable bend-kick-bend model, found {xtrack_version}"
+        )
+
+    bend_core = "bend-kick-bend"
+    bend_integrator = "uniform"
 
     logger.info(
-        "Configuring xsuite line '%s' for machine length %.3f m with bend core=%s integrator=%s kicks=%d",
+        "Configuring xsuite line '%s' for machine length %.3f m with bend core=%s integrator=%s",
         getattr(line, "name", "<unnamed>"),
         machine_length,
         bend_core,
         bend_integrator,
-        num_multipole_kicks,
     )
     line.configure_bend_model(
         core=bend_core,
         edge="full",
         integrator=bend_integrator,
-        num_multipole_kicks=num_multipole_kicks,
+        num_multipole_kicks=1,
     )
     line.configure_drift_model(model="exact")
+
+    # loop through all the elements, check that the bending magnets are only dipoles (no multipole components)
+    for name, elm in line._element_dict.items():
+        if isinstance(elm, xt.Bend) and (
+            not np.isclose(elm.k1, 0.0, atol=1e-10)
+            or not np.isclose(elm.k2, 0.0, atol=1e-10)
+            or not np.all(elm.knl[1:] == 0.0)
+            or not np.all(elm.ksl == 0.0)
+        ):
+            raise ValueError(
+                f"Bend element '{name}' has non-zero multipole components: k1={elm.k1}, k2={elm.k2}"
+            )
 
 
 def create_xsuite_environment(

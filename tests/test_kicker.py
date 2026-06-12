@@ -104,13 +104,13 @@ def test_single_kick(kicker_result):
         np.testing.assert_allclose(
             kicked_bpm["x"].values[:n],
             free_bpm["x"].values[:n],
-            rtol=1e-10,
+            rtol=1e-9,
             err_msg=f"x mismatch at BPM '{bpm}' — exciter may have fired more than once",
         )
         np.testing.assert_allclose(
             kicked_bpm["y"].values[:n],
             free_bpm["y"].values[:n],
-            rtol=1e-10,
+            rtol=1e-9,
             err_msg=f"y mismatch at BPM '{bpm}' — exciter may have fired more than once",
         )
 

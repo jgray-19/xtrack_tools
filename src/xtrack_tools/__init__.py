@@ -13,7 +13,7 @@ from .env import (
     create_xsuite_environment,
     initialise_env,
 )
-from .line import get_element_s_position
+from .line import get_element_s_centre
 from .monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,

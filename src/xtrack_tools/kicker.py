@@ -8,7 +8,7 @@ import xtrack as xt
 from xobjects import ContextCpu as Context
 
 from .env import create_xsuite_environment
-from .line import get_element_s_position
+from .line import get_element_s_centre
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -221,7 +221,7 @@ def run_kicker_track(
 
     tws: xt.TwissTable = baseline_line.twiss(method="4d")
     frev = float(1.0 / tws.t_rev0)
-    s_kicker = get_element_s_position(baseline_line, tkicker_name)
+    s_kicker = get_element_s_centre(baseline_line, tkicker_name)
     logger.info("tkicker '%s' at s=%.3f m, frev=%.6f Hz", tkicker_name, s_kicker, frev)
 
     knl, ksl = _knl_ksl(kick_strength, plane)

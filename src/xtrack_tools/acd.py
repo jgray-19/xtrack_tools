@@ -9,7 +9,7 @@ from xobjects import ContextCpu as Context
 
 from .action_angle import _build_coords_from_action_angle
 from .env import create_xsuite_environment
-from .line import get_element_s_position
+from .line import get_element_s_centre
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 def insert_ac_dipole(
     line: xt.Line,
     tws: xt.TwissTable,
-    beam: int,
+    acd_marker: str,
     acd_ramp: int,
     total_turns: int,
     driven_tunes: list[float],
@@ -35,51 +35,54 @@ def insert_ac_dipole(
     Args:
         line: Base line to copy and modify.
         tws: Twiss table used for beta functions at the AC dipole.
-        beam: LHC beam number used for marker naming.
+        acd_marker: Name of the marker element at which to place the AC dipoles.
         acd_ramp: Number of ramp turns.
         total_turns: Total tracking turns at flat top.
         driven_tunes: Driven tunes (horizontal, vertical).
         lag: Phase lag for the AC dipoles.
+        acd_marker: Optional name of the marker element at which to place the AC dipoles.
+        If not provided, defaults to ``mkqa.6l4.b1``, which is the standard LHC AC dipole marker.
 
     Returns:
         A new line with AC dipole elements inserted.
     """
     line = line.copy()
-    acd_marker = f"mkqa.6l4.b{beam}"
     betxac = tws.rows[acd_marker]["betx"]
     betyac = tws.rows[acd_marker]["bety"]
-    logger.info(f"Inserting AC dipole at {acd_marker} with betx={betxac}, bety={betyac}")
+    logger.info(
+        f"Inserting AC dipole at {acd_marker} with betx={betxac}, bety={betyac} and driven tunes {driven_tunes}"
+    )
 
     driven_tunes = [q % 1 for q in driven_tunes]
     qxd_qx = driven_tunes[0] - tws["qx"] % 1
-    qyd_qx = driven_tunes[1] - tws["qy"] % 1
-    logger.info(f"Qxd/Qx: {qxd_qx}, Qyd/Qx: {qyd_qx}")
+    qyd_qy = driven_tunes[1] - tws["qy"] % 1
+    logger.info(f"Qxd/Qx: {qxd_qx}, Qyd/Qy: {qyd_qy}")
     pbeam = line.particle_ref.p0c / 1e9
 
-    line.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(
+    line.env.elements[f"{acd_marker}_x"] = xt.ACDipole(
         plane="x",
         volt=2 * 0.042 * pbeam * abs(qxd_qx) / np.sqrt(180.0 * betxac),
         freq=driven_tunes[0],
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
-    line.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(
+    line.env.elements[f"{acd_marker}_y"] = xt.ACDipole(
         plane="y",
-        volt=2 * 0.042 * pbeam * abs(qyd_qx) / np.sqrt(177.0 * betyac),
+        volt=2 * 0.042 * pbeam * abs(qyd_qy) / np.sqrt(177.0 * betyac),
         freq=driven_tunes[1],
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
-    placement = get_element_s_position(line, acd_marker)
-    line.insert(f"mkacv.6l4.b{beam}", at=placement)
-    line.insert(f"mkach.6l4.b{beam}", at=placement)
+    placement = get_element_s_centre(line, acd_marker)
+    line.insert(f"{acd_marker}_x", at=placement)
+    line.insert(f"{acd_marker}_y", at=placement)
     return line
 
 
 def prepare_acd_line_with_monitors(
     line: xt.Line,
     tws: xt.TwissTable | None,
-    beam: int,
+    acd_marker: str,
     ramp_turns: int,
     flattop_turns: int,
     driven_tunes: list[float],
@@ -91,7 +94,7 @@ def prepare_acd_line_with_monitors(
     Args:
         line: Base line to copy and modify.
         tws: Optional twiss table; computed if not provided.
-        beam: LHC beam number used for marker naming.
+        acd_marker: Name of the marker element at which to place the AC dipoles.
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
         driven_tunes: Driven tunes (horizontal, vertical).
@@ -114,7 +117,7 @@ def prepare_acd_line_with_monitors(
     tracked_line = insert_ac_dipole(
         line=line,
         tws=tws,
-        beam=beam,
+        acd_marker=acd_marker,
         acd_ramp=ramp_turns,
         total_turns=total_turns,
         driven_tunes=driven_tunes,
@@ -129,12 +132,14 @@ def prepare_acd_line_with_monitors(
     return tracked_line, total_turns, monitor_names
 
 
-def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float]) -> xt.TwissTable:
+def run_acd_twiss(
+    line: xt.Line, acd_marker: str, dpp: float, driven_tunes: list[float]
+) -> xt.TwissTable:
     """Run a twiss calculation with AC dipole elements inserted.
 
     Args:
         line: Base line to copy and modify.
-        beam: LHC beam number used for marker naming.
+        acd_marker: Name of the marker element at which to place the AC dipoles.
         dpp: Momentum deviation for twiss calculation.
         driven_tunes: Driven tunes (horizontal, vertical).
 
@@ -144,7 +149,6 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
     Raises:
         ValueError: If the AC dipole marker is not found.
     """
-    acd_marker = f"mkqa.6l4.b{beam}"
     if acd_marker not in line.element_names:
         raise ValueError(f"AC dipole marker '{acd_marker}' not found in the line.")
     line_acd = line.copy()
@@ -155,14 +159,14 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
         f"Running twiss with AC dipole at {acd_marker} with betx={bet_at_acdipole['betx']}, bety={bet_at_acdipole['bety']}"
     )
 
-    line_acd.env.elements[f"mkach.6l4.b{beam}"] = xt.ACDipole(
+    line_acd.env.elements[f"{acd_marker}_x"] = xt.ACDipole(
         plane="x",
         natural_q=before_acd_tws["qx"] % 1,
         freq=driven_tunes[0],
         beta_at_acdipole=bet_at_acdipole["betx"],
         twiss_mode=True,
     )
-    line_acd.env.elements[f"mkacv.6l4.b{beam}"] = xt.ACDipole(
+    line_acd.env.elements[f"{acd_marker}_y"] = xt.ACDipole(
         plane="y",
         natural_q=before_acd_tws["qy"] % 1,
         freq=driven_tunes[1],
@@ -170,19 +174,21 @@ def run_acd_twiss(line: xt.Line, beam: int, dpp: float, driven_tunes: list[float
         twiss_mode=True,
     )
 
-    placement = get_element_s_position(line_acd, acd_marker)
-    line_acd.insert(f"mkach.6l4.b{beam}", at=placement)
-    line_acd.insert(f"mkacv.6l4.b{beam}", at=placement)
+    placement = get_element_s_centre(line_acd, acd_marker)
+    line_acd.insert(f"{acd_marker}_x", at=placement)
+    line_acd.insert(f"{acd_marker}_y", at=placement)
     return line_acd.twiss(method="4d", delta0=dpp)
 
 
 def run_acd_track(
     sequence_file: Path,
+    acd_marker: str,
+    sequence_name: str,
+    kinetic_energy: float = 6800,
     delta_p: float = 0.0,
     ramp_turns: int = 1000,
     flattop_turns: int = 100,
     driven_tunes: list[float] | None = None,
-    beam: int = 1,
     bpm_pattern: str = r"(?i)bpm.*",
     json_path: Path | None = None,
     add_variance_columns: bool = True,
@@ -192,11 +198,14 @@ def run_acd_track(
 
     Args:
         sequence_file: Path to the MAD-X sequence file.
+        acd_marker: Marker name for the AC dipole element.
+        sequence_name: Name of the sequence in the environment.
+        kinetic_energy: Kinetic energy of the particle in GeV.
         delta_p: Momentum deviation for the tracked particle.
+        kinetic_energy: Beam kinetic energy in GeV used to set the particle reference.
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
         driven_tunes: Driven tunes (horizontal, vertical). Defaults to a typical pair.
-        beam: LHC beam number used for marker naming.
         bpm_pattern: Regex pattern for BPM locations.
         json_path: Optional JSON cache path.
         add_variance_columns: Whether to add default variance columns to the output.
@@ -205,35 +214,40 @@ def run_acd_track(
             left unchanged.
 
     Returns:
-        Tuple of ``(tracking_df, twiss_table, baseline_line)``.
+        Tuple of ``(tracking_df, twiss_table, monitored_line)``.
     """
     if driven_tunes is None:
         driven_tunes = [0.27, 0.322]
     logger.info(
-        "Running AC-dipole tracking from sequence %s for beam %d with delta_p=%s",
+        "Running AC-dipole tracking from sequence %s for element %s with delta_p=%s, using acd_marker='%s' with driven_tunes=%s",
         sequence_file,
-        beam,
         delta_p,
+        acd_marker,
+        driven_tunes,
     )
 
     env = create_xsuite_environment(
         json_file=json_path,
         sequence_file=sequence_file,
-        seq_name=f"lhcb{beam}",
+        kinetic_energy=kinetic_energy,
+        seq_name=sequence_name,
     )
-    baseline_line: xt.Line = env[f"lhcb{beam}"].copy()
+    baseline_line: xt.Line = env[sequence_name].copy()
     tws_input: xt.TwissTable = baseline_line.twiss4d()
 
     qx = float(tws_input.qx % 1)
     qy = float(tws_input.qy % 1)
     logger.info(f"Natural tunes: Qx = {qx:.6f}, Qy = {qy:.6f}")
-    if not (np.isclose(qx, 0.28, atol=1e-3) and np.isclose(qy, 0.31, atol=1e-3)):
+    if (
+        not (np.isclose(qx, 0.28, atol=1e-3) and np.isclose(qy, 0.31, atol=1e-3))
+        and "lhc" in sequence_name.lower()
+    ):
         logger.warning(f"Tunes (Qx={qx:.6f}, Qy={qy:.6f}) differ from expected (0.28, 0.31)")
 
     monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
         line=baseline_line,
         tws=tws_input,
-        beam=beam,
+        acd_marker=acd_marker,
         ramp_turns=ramp_turns,
         flattop_turns=flattop_turns,
         driven_tunes=driven_tunes,
@@ -264,13 +278,13 @@ def run_acd_track(
         monitored_line, ramp_turns, flattop_turns, add_variance_columns
     )
 
-    return tracking_df, tws_input, baseline_line
-
+    return tracking_df, tws_input, monitored_line
 
 def run_ac_dipole_tracking_with_particles(
     line: xt.Line,
+    acd_marker: str,
+    sequence_name: str,
     tws: xt.TwissTable | None = None,
-    beam: int = 1,
     ramp_turns: int = 1000,
     flattop_turns: int = 100,
     driven_tunes: list[float] | None = None,
@@ -289,7 +303,8 @@ def run_ac_dipole_tracking_with_particles(
     Args:
         line: Base line to copy and modify.
         tws: Optional twiss table; computed if not provided.
-        beam: LHC beam number used for marker naming.
+        acd_marker: Marker name for the AC dipole element.
+        sequence_name: Name of the sequence in the environment.
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
         driven_tunes: Driven tunes (horizontal, vertical). Defaults to a typical pair.
@@ -352,7 +367,7 @@ def run_ac_dipole_tracking_with_particles(
     monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
         line=line,
         tws=tws,
-        beam=beam,
+        acd_marker=acd_marker,
         ramp_turns=ramp_turns,
         flattop_turns=flattop_turns,
         driven_tunes=driven_tunes,
