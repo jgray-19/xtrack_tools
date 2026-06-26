@@ -8,7 +8,7 @@ import xtrack as xt
 from xobjects import ContextCpu as Context
 
 from .env import create_xsuite_environment
-from .line import get_element_s_centre
+from .line import get_element_s_centre, make_element_thin
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -192,6 +192,9 @@ def run_kicker_track(
 
     Returns:
         Tuple of ``(tracking_df, twiss_table, baseline_line, s_kicker, kick_turn)``.
+        The tkicker is collapsed to a zero-length marker at its centre before
+        twissing, so its Twiss row (and ``s_kicker``) sit exactly where the
+        exciter fires.
 
     Raises:
         ValueError: If ``tkicker_name`` is not found in the line.
@@ -219,9 +222,16 @@ def run_kicker_track(
     if tkicker_name not in baseline_line.element_names:
         raise ValueError(f"tkicker element '{tkicker_name}' not found in line '{seq}'.")
 
+    # Collapse the (generally thick) tkicker to a zero-length marker at its
+    # centre *before* twissing, so its Twiss row carries the optics exactly where
+    # the exciter fires. Otherwise the row sits at the element entry, ~half its
+    # length upstream of the kick point, and the reconstruction picks up a
+    # drift-length error.
+    tkicker_name = make_element_thin(baseline_line, tkicker_name)
+    s_kicker = get_element_s_centre(baseline_line, tkicker_name)
+
     tws: xt.TwissTable = baseline_line.twiss(method="4d")
     frev = float(1.0 / tws.t_rev0)
-    s_kicker = get_element_s_centre(baseline_line, tkicker_name)
     logger.info("tkicker '%s' at s=%.3f m, frev=%.6f Hz", tkicker_name, s_kicker, frev)
 
     knl, ksl = _knl_ksl(kick_strength, plane)

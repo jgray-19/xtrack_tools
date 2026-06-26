@@ -9,7 +9,7 @@ import pandas as pd
 import tfs
 from turn_by_turn import convert_to_tbt
 
-from .line import get_element_s_centre
+from .line import get_element_s_centre, next_available_element_name
 
 if TYPE_CHECKING:
     import xtrack as xt
@@ -57,16 +57,6 @@ def _normalise_recorded_multi_element_monitor_names(
     monitor._name_to_index = {name: idx for idx, name in enumerate(monitor.obs_names)}
 
 
-def _next_available_element_name(line: xt.Line, base_name: str) -> str:
-    """Return an element name that is unused in both the line and its environment."""
-    candidate = base_name
-    suffix = 1
-    while candidate in line.env.elements or candidate in line.element_names:
-        candidate = f"{base_name}_{suffix}"
-        suffix += 1
-    return candidate
-
-
 def replace_thick_monitors_with_thin_markers(
     line: xt.Line,
     monitor_names: list[str],
@@ -105,7 +95,7 @@ def replace_thick_monitors_with_thin_markers(
             thin_monitor_names.append(monitor_name)
             continue
 
-        thin_name = _next_available_element_name(line, f"{monitor_name}__thin")
+        thin_name = next_available_element_name(line, f"{monitor_name}__thin")
         monitor_center = get_element_s_centre(line, monitor_name, table=line_table)
         line.env.elements[thin_name] = xt.Marker()
         insertions.append(line.env.place(thin_name, at=monitor_center))
