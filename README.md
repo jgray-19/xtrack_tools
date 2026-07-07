@@ -1,6 +1,7 @@
 # xtrack-tools
 
 [![codecov](https://codecov.io/gh/jgray-19/xtrack_tools/graph/badge.svg?token=9QSX96FJQB)](https://codecov.io/gh/jgray-19/xtrack_tools)
+[![Coverage](https://github.com/jgray-19/xtrack_tools/actions/workflows/coverage.yml/badge.svg)](https://github.com/jgray-19/xtrack_tools/actions/workflows/coverage.yml)
 
 Local tools for xtrack/xsuite workflows.
 
