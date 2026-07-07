@@ -26,6 +26,10 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "pymadng",
+]
+madng = [
+    "pymadng",
 ]
 docs = [
     "sphinx>=7",

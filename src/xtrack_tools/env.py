@@ -16,14 +16,47 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SMALL_MACHINE_LENGTH_THRESHOLD_M = 1_000.0
-_SMALL_MACHINE_NUM_MULTIPOLE_KICKS = 1
-_LARGE_MACHINE_NUM_MULTIPOLE_KICKS = 10
+# Number of kicks per thick element for the exact (drift-kick-drift) integrator.
+# MAD-NG uses a single exact thick map; xsuite reproduces it by integrating with
+# enough kicks. 64 reaches machine precision per element for LHC-strength quads
+# (see tests/test_madng_element_precision.py); it is *not* a slicing count -- the
+# thick element stays intact and is integrated internally.
+_DEFAULT_NUM_MULTIPOLE_KICKS = 64
+
+# Element types whose thick body is integrated with the exact drift-kick-drift
+# model. Bends are configured separately (see below).
+_EXACT_THICK_TYPES = ("Quadrupole", "Sextupole", "Octupole", "Multipole")
 
 
-def _configure_line_models(line: xt.Line) -> None:
-    """Configure bend and drift models from the machine length."""
-    machine_length = float(line.get_length())
+def _configure_line_models(
+    line: xt.Line, num_multipole_kicks: int = _DEFAULT_NUM_MULTIPOLE_KICKS
+) -> None:
+    """Configure element models so xsuite reproduces MAD-NG's exact thick maps.
+
+    MAD-NG integrates the *exact* Hamiltonian. xsuite's ``mat-kick-mat`` model,
+    used previously for quadrupoles, uses the *expanded* (paraxial) Hamiltonian:
+    its per-element error grows as the cube of the transverse angle and does not
+    shrink with more kicks (it is a formulation error, not an integration error),
+    so the two codes disagree by ~1e-9 relative per element. Over a full ring this
+    accumulates into a ~5e-7 tune / ~1e-8 orbit difference, largest in the plane
+    with the biggest angles (the crossing plane through the triplet).
+
+    Using ``drift-kick-drift-exact`` with the ``yoshida4`` integrator and enough
+    kicks matches MAD-NG to machine precision per element. Bends already match
+    with ``bend-kick-bend`` (~3e-14); the ``expanded`` / ``drift-kick-drift``
+    bend cores are the paraxial ones and must *not* be used.
+
+    Args:
+        line: The xsuite line to configure in place.
+        num_multipole_kicks: Kicks used to integrate each thick quadrupole /
+            multipole body. Higher is more accurate (and slower); the default
+            reaches machine precision for LHC-strength elements.
+
+    Raises:
+        RuntimeError: If the installed xtrack is older than 0.105.1.
+        ValueError: If a bend carries non-zero multipole components (it would not
+            be reproduced by the pure-dipole ``bend-kick-bend`` configuration).
+    """
     # This only works with xtrack version 0.105.1 or later, which makes the bend-kick-bend model stable even small bending angles.
     xtrack_version = Version(version("xtrack"))
     if xtrack_version < Version("0.105.1"):
@@ -31,23 +64,30 @@ def _configure_line_models(line: xt.Line) -> None:
             f"xtrack version 0.105.1 or later is required for stable bend-kick-bend model, found {xtrack_version}"
         )
 
-    bend_core = "bend-kick-bend"
-    bend_integrator = "uniform"
-
     logger.info(
-        "Configuring xsuite line '%s' for machine length %.3f m with bend core=%s integrator=%s",
+        "Configuring xsuite line '%s' (length %.3f m) to match MAD-NG exact maps "
+        "(bend core=bend-kick-bend, thick core=drift-kick-drift-exact, kicks=%d)",
         getattr(line, "name", "<unnamed>"),
-        machine_length,
-        bend_core,
-        bend_integrator,
-    )
-    line.configure_bend_model(
-        core=bend_core,
-        edge="full",
-        integrator=bend_integrator,
-        num_multipole_kicks=1,
+        float(line.get_length()),
+        num_multipole_kicks,
     )
     line.configure_drift_model(model="exact")
+    line.configure_bend_model(
+        core="bend-kick-bend",
+        edge="full",
+        integrator="uniform",
+        num_multipole_kicks=1,
+    )
+    tt: xt.Table = line.get_table()
+    for element_type in _EXACT_THICK_TYPES:
+        rows = tt.rows[tt.element_type == element_type]
+        if len(rows.name):
+            line.set(
+                rows,
+                model="drift-kick-drift-exact",
+                integrator="yoshida4",
+                num_multipole_kicks=num_multipole_kicks,
+            )
 
     # loop through all the elements, check that the bending magnets are only dipoles (no multipole components)
     for name, elm in line._element_dict.items():
@@ -129,22 +169,13 @@ def create_xsuite_environment(
         mass=xp.PROTON_MASS_EV,
         kinetic_energy0=kinetic_energy * 1e9,
     )
-    logger.info("Environment ready with line '%s'", seq_name_lower)
+    logger.info(
+        "Environment ready with line '%s' at energy %s GeV",
+        seq_name_lower,
+        env[seq_name_lower].particle_ref.energy0 / 1e9,
+    )
 
     _configure_line_models(env[seq_name_lower])
-
-    # Loop through all the elements, if it's a multipole, then set the integrator to "yoshida4" and the model to "mat-kick-mat"
-    for name, elm in env[seq_name_lower]._element_dict.items():
-        if isinstance(elm, xt.Multipole):
-            env[seq_name_lower].set(name, integrator="yoshida4", model="mat-kick-mat")
-            logger.debug(
-                f"Updated Multipole {name}: integrator set to yoshida4 and model set to mat-kick-mat"
-            )
-        if isinstance(elm, xt.Quadrupole):
-            env[seq_name_lower].set(name, integrator="yoshida4", model="mat-kick-mat")
-            logger.debug(
-                f"Updated Quadrupole {name}: integrator set to yoshida4 and model set to mat-kick-mat"
-            )
 
     return env
 
@@ -239,7 +270,9 @@ def initialise_env(
         base_attr = _dknl_to_base.get(var)
         if base_attr is not None:
             current = getattr(base_env[magnet_name.lower()], base_attr, 0.0) or 0.0
-            logger.debug(f"Applying delta {strength} to {magnet_name.lower()}.{base_attr} (was {current})")
+            logger.debug(
+                f"Applying delta {strength} to {magnet_name.lower()}.{base_attr} (was {current})"
+            )
             base_env.set(magnet_name.lower(), **{base_attr: current + strength})
         else:
             logger.debug(f"Setting {magnet_name.lower()} {var} to {strength}")
