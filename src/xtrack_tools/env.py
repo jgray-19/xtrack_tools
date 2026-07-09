@@ -269,11 +269,23 @@ def initialise_env(
         magnet_name, var = str_name.rsplit(".", 1)
         base_attr = _dknl_to_base.get(var)
         if base_attr is not None:
-            current = getattr(base_env[magnet_name.lower()], base_attr, 0.0) or 0.0
+            element = base_env[magnet_name.lower()]
+            length = float(getattr(element, "length", getattr(element, "l", 0.0)) or 0.0)
+            if length == 0.0:
+                raise ValueError(
+                    f"Cannot apply integrated perturbation {str_name!r} to zero-length element"
+                )
+            delta = strength / length
+            current = getattr(element, base_attr, 0.0) or 0.0
             logger.debug(
-                f"Applying delta {strength} to {magnet_name.lower()}.{base_attr} (was {current})"
+                "Applying integrated delta %s to %s.%s as per-length delta %s (was %s)",
+                strength,
+                magnet_name.lower(),
+                base_attr,
+                delta,
+                current,
             )
-            base_env.set(magnet_name.lower(), **{base_attr: current + strength})
+            base_env.set(magnet_name.lower(), **{base_attr: current + delta})
         else:
             logger.debug(f"Setting {magnet_name.lower()} {var} to {strength}")
             base_env.set(magnet_name.lower(), **{var: strength})

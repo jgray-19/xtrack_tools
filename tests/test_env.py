@@ -111,3 +111,33 @@ def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, 
         assert np.isclose(env[row.ename.lower()].knl[0], -row.hkick)
         assert len(env[row.ename.lower()].ksl) == 1
         assert np.isclose(env[row.ename.lower()].ksl[0], row.vkick)
+
+
+def test_initialise_env_converts_integrated_dknl_to_per_length_strength(
+    corrector_table, seq_b1, tmp_path
+):
+    """Integrated dk*l perturbations are applied as per-length k* deltas."""
+    json_file = tmp_path / "temp_xsuite.json"
+    element_name = "mqy.b5l2.b1"
+    integrated_delta = 2.0e-6
+
+    base_env = create_xsuite_environment(
+        sequence_file=seq_b1,
+        seq_name=LHCB1_SEQ_NAME,
+        json_file=json_file,
+    )
+    element = base_env[element_name]
+    initial_k1 = element.k1
+    length = element.length
+
+    env = initialise_env(
+        matched_tunes={},
+        magnet_strengths={f"{element_name}.dk1l": integrated_delta},
+        corrector_table=corrector_table,
+        sequence_file=seq_b1,
+        kinetic_energy=BEAM_ENERGY,
+        seq_name=LHCB1_SEQ_NAME,
+        json_file=json_file,
+    )
+
+    assert np.isclose(env[element_name].k1, initial_k1 + integrated_delta / length)
