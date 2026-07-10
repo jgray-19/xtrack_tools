@@ -13,7 +13,10 @@ from .env import (
     create_xsuite_environment,
     initialise_env,
 )
-from .line import get_element_s_centre
+from .errors import (
+    apply_relative_bend_field_errors,
+    apply_vertical_quad_misalignment,
+)
 from .monitors import (
     get_monitor_names_at_pattern,
     line_to_dataframes,
@@ -34,6 +37,8 @@ __all__ = [
     "run_acd_twiss",
     "create_xsuite_environment",
     "initialise_env",
+    "apply_relative_bend_field_errors",
+    "apply_vertical_quad_misalignment",
     "get_element_s_position",
     "get_monitor_names_at_pattern",
     "line_to_dataframes",
