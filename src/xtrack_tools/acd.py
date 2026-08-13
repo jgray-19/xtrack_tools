@@ -7,7 +7,6 @@ import numpy as np
 import xtrack as xt
 from xobjects import ContextCpu as Context
 
-from .action_angle import _build_coords_from_action_angle
 from .env import create_xsuite_environment
 from .line import get_element_s_centre, resolve_element_name
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
@@ -33,6 +32,8 @@ def insert_ac_dipole(
     acd_ramp: int,
     total_turns: int,
     driven_tunes: list[float],
+    horizontal_excitation: float,
+    vertical_excitation: float,
     lag: float = 0.0,
     insert_state_markers: bool = False,
 ) -> xt.Line:
@@ -45,6 +46,8 @@ def insert_ac_dipole(
         acd_ramp: Number of ramp turns.
         total_turns: Total tracking turns at flat top.
         driven_tunes: Driven tunes (horizontal, vertical).
+        horizontal_excitation: Horizontal excitation scale.
+        vertical_excitation: Vertical excitation scale.
         lag: Phase lag for the AC dipoles.
         insert_state_markers: If ``True``, also insert zero-length markers
             ``{acd_marker}_before`` and ``{acd_marker}_after`` a tiny step (1e-8 m)
@@ -69,29 +72,35 @@ def insert_ac_dipole(
 
     line.env.elements[f"{acd_marker}_x"] = xt.ACDipole(
         plane="x",
-        volt=2 * 0.042 * pbeam * abs(qxd_qx) / np.sqrt(180.0 * betxac),
+        volt=horizontal_excitation * pbeam * abs(qxd_qx) / np.sqrt(betxac),
         freq=driven_tunes[0],
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
     line.env.elements[f"{acd_marker}_y"] = xt.ACDipole(
         plane="y",
-        volt=2 * 0.042 * pbeam * abs(qyd_qy) / np.sqrt(177.0 * betyac),
+        volt=vertical_excitation * pbeam * abs(qyd_qy) / np.sqrt(betyac),
         freq=driven_tunes[1],
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
     placement = get_element_s_centre(line, acd_marker)
+    # Insert every element in a single ``line.insert`` call: each insert re-slices
+    # the whole (thick) line via ``cut_at_s``, which dominates the runtime for large
+    # lattices, so batching turns N re-slices into one. Ordering within the batch is
+    # preserved, so the x kick still precedes the y kick at the shared placement.
+    insertions = []
     if insert_state_markers:
         before_name, after_name = state_marker_names(acd_marker)
         line.env.elements[before_name] = xt.Marker()
         line.env.elements[after_name] = xt.Marker()
         # Offset the markers by a tiny step so they sit unambiguously up- and
         # downstream of the kicks (a 1e-8 m drift is negligible for the state).
-        line.insert(before_name, at=placement - 1e-8)
-        line.insert(after_name, at=placement + 1e-8)
-    line.insert(f"{acd_marker}_x", at=placement)
-    line.insert(f"{acd_marker}_y", at=placement)
+        insertions.append(line.env.place(before_name, at=placement - 1e-8))
+        insertions.append(line.env.place(after_name, at=placement + 1e-8))
+    insertions.append(line.env.place(f"{acd_marker}_x", at=placement))
+    insertions.append(line.env.place(f"{acd_marker}_y", at=placement))
+    line.insert(insertions)
     return line
 
 
@@ -102,6 +111,8 @@ def prepare_acd_line_with_monitors(
     ramp_turns: int,
     flattop_turns: int,
     driven_tunes: list[float],
+    horizontal_excitation: float,
+    vertical_excitation: float,
     lag: float,
     bpm_pattern: str,
     insert_state_markers: bool = False,
@@ -115,6 +126,8 @@ def prepare_acd_line_with_monitors(
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
         driven_tunes: Driven tunes (horizontal, vertical).
+        horizontal_excitation: Horizontal excitation scale.
+        vertical_excitation: Vertical excitation scale.
         lag: Phase lag for the AC dipoles.
         bpm_pattern: Regex pattern for BPM locations.
 
@@ -138,6 +151,8 @@ def prepare_acd_line_with_monitors(
         acd_ramp=ramp_turns,
         total_turns=total_turns,
         driven_tunes=driven_tunes,
+        horizontal_excitation=horizontal_excitation,
+        vertical_excitation=vertical_excitation,
         lag=lag,
         insert_state_markers=insert_state_markers,
     )
@@ -195,8 +210,13 @@ def run_acd_twiss(
     )
 
     placement = get_element_s_centre(line_acd, acd_marker)
-    line_acd.insert(f"{acd_marker}_x", at=placement)
-    line_acd.insert(f"{acd_marker}_y", at=placement)
+    # Batch both inserts so the line is re-sliced once rather than twice.
+    line_acd.insert(
+        [
+            line_acd.env.place(f"{acd_marker}_x", at=placement),
+            line_acd.env.place(f"{acd_marker}_y", at=placement),
+        ]
+    )
     return line_acd.twiss(method="4d", delta0=dpp)
 
 
@@ -214,6 +234,9 @@ def run_acd_track(
     add_variance_columns: bool = True,
     replace_thick_monitors_with_thin: bool = True,
     state_markers: bool = False,
+    *,
+    horizontal_excitation: float,
+    vertical_excitation: float,
 ) -> tuple[pd.DataFrame, xt.TwissTable, xt.Line]:
     """Run AC dipole tracking for a sequence file and return tracking data.
 
@@ -227,6 +250,8 @@ def run_acd_track(
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
         driven_tunes: Driven tunes (horizontal, vertical). Defaults to a typical pair.
+        horizontal_excitation: Horizontal excitation scale.
+        vertical_excitation: Vertical excitation scale.
         bpm_pattern: Regex pattern for BPM locations.
         json_path: Optional JSON cache path.
         add_variance_columns: Whether to add default variance columns to the output.
@@ -259,7 +284,7 @@ def run_acd_track(
     )
     baseline_line: xt.Line = env[sequence_name].copy()
     acd_marker = resolve_element_name(baseline_line, acd_marker)
-    tws_input: xt.TwissTable = baseline_line.twiss4d()
+    tws_input: xt.TwissTable = baseline_line.twiss(method="4d", delta0=delta_p)
 
     qx = float(tws_input.qx % 1)
     qy = float(tws_input.qy % 1)
@@ -268,7 +293,9 @@ def run_acd_track(
         not (np.isclose(qx, 0.28, atol=1e-3) and np.isclose(qy, 0.31, atol=1e-3))
         and "lhc" in sequence_name.lower()
     ):
-        logger.warning(f"Tunes (Qx={qx:.6f}, Qy={qy:.6f}) differ from expected (0.28, 0.31)")
+        logger.warning(
+            f"Tunes (Qx={qx:.6f}, Qy={qy:.6f}) differ from expected (0.28, 0.31)"
+        )
 
     monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
         line=baseline_line,
@@ -277,18 +304,21 @@ def run_acd_track(
         ramp_turns=ramp_turns,
         flattop_turns=flattop_turns,
         driven_tunes=driven_tunes,
+        horizontal_excitation=horizontal_excitation,
+        vertical_excitation=vertical_excitation,
         lag=0.0,
         bpm_pattern=bpm_pattern,
         insert_state_markers=state_markers,
     )
 
     ctx = Context()
+    start_elem = monitored_line.element_names[0]
     particles: xt.Particles = monitored_line.build_particles(
         _context=ctx,
-        x=0,
-        y=0,
-        px=0,
-        py=0,
+        x=tws_input["x", start_elem],
+        px=tws_input["px", start_elem],
+        y=tws_input["y", start_elem],
+        py=tws_input["py", start_elem],
         delta=delta_p,
     )
 
@@ -307,43 +337,41 @@ def run_acd_track(
 
     return tracking_df, tws_input, monitored_line
 
-def run_ac_dipole_tracking_with_particles(
+
+def run_ac_dipole_tracking(
     line: xt.Line,
     acd_marker: str,
     sequence_name: str,
+    driven_tunes: list[float] | None = None,
     tws: xt.TwissTable | None = None,
     ramp_turns: int = 1000,
     flattop_turns: int = 100,
-    driven_tunes: list[float] | None = None,
     lag: float = 0.0,
     bpm_pattern: str = r"bpm.*[^k]",
-    particle_coords: dict[str, list[float]] | None = None,
-    action_list: list[float] | None = None,
-    angle_list: list[float] | None = None,
-    use_diagonal_kicks: bool = True,
     start_marker: str | None = None,
-    delta_values: list[float] | None = None,
+    deltap: float = 0.0,
     replace_thick_monitors_with_thin: bool = True,
     state_markers: bool = False,
+    *,
+    horizontal_excitation: float,
+    vertical_excitation: float,
 ) -> xt.Line:
-    """Track multiple particles with an AC dipole using explicit or action-angle inputs.
+    """Track one closed-orbit particle with an AC dipole.
 
     Args:
         line: Base line to copy and modify.
-        tws: Optional twiss table; computed if not provided.
         acd_marker: Marker name for the AC dipole element.
         sequence_name: Name of the sequence in the environment.
+        driven_tunes: Driven tunes (horizontal, vertical). Defaults to a typical pair.
+        horizontal_excitation: Horizontal excitation scale.
+        vertical_excitation: Vertical excitation scale.
+        tws: Optional Twiss table; computed if not provided.
         ramp_turns: Number of ramp turns.
         flattop_turns: Number of flat-top turns.
-        driven_tunes: Driven tunes (horizontal, vertical). Defaults to a typical pair.
         lag: Phase lag for the AC dipoles.
         bpm_pattern: Regex pattern for BPM locations.
-        particle_coords: Explicit coordinates for each particle.
-        action_list: Action values for initial conditions.
-        angle_list: Angle values for initial conditions.
-        use_diagonal_kicks: If ``True``, initialize both planes.
         start_marker: Optional marker name to set as the first element.
-        delta_values: Optional momentum offsets per particle.
+        deltap: Momentum deviation for the tracked particle.
         replace_thick_monitors_with_thin: If ``True``, replace thick monitored
             elements with thin monitor points before tracking. Thin monitors are
             left unchanged.
@@ -355,7 +383,7 @@ def run_ac_dipole_tracking_with_particles(
         The monitored line after tracking.
 
     Raises:
-        ValueError: If neither explicit coordinates nor action-angle inputs are provided.
+        ValueError: If the provided Twiss table was not computed at ``deltap``.
     """
     if driven_tunes is None:
         driven_tunes = [0.27, 0.322]
@@ -367,42 +395,42 @@ def run_ac_dipole_tracking_with_particles(
         bpm_pattern,
     )
 
-    if particle_coords is not None:
-        num_particles = len(particle_coords["x"])
-        xs = particle_coords["x"]
-        pxs = particle_coords["px"]
-        ys = particle_coords["y"]
-        pys = particle_coords["py"]
-        deltas = particle_coords.get("delta", [0.0] * num_particles)
-    elif action_list is not None and angle_list is not None:
-        working_line = line.copy()
-        if start_marker is not None:
-            working_line.cycle(name_first_element=start_marker.lower(), inplace=True)
-            start_elem = working_line.element_names[0].upper()
-        else:
-            start_elem = working_line.element_names[0].upper()
+    working_line = line.copy()
+    if start_marker is not None:
+        working_line.cycle(name_first_element=start_marker.lower(), inplace=True)
+    start_elem = working_line.element_names[0]
 
-        if tws is None:
-            tws = working_line.twiss4d()
-        xs, pxs, ys, pys = _build_coords_from_action_angle(
-            action_list,
-            angle_list,
-            tws,
-            use_diagonal_kicks,
-            start_elem,
-        )
-        num_particles = len(xs)
-        deltas = delta_values if delta_values is not None else [0.0] * num_particles
+    if tws is None:
+        tws = working_line.twiss(method="4d", delta0=deltap)
     else:
-        raise ValueError("Provide particle_coords or both action_list and angle_list")
+        twiss_delta = np.asarray(tws["delta"], dtype=float)
+        delta_diff = np.abs(twiss_delta - deltap)
+        relative_delta_diff = np.divide(
+            delta_diff,
+            np.abs(twiss_delta),
+            out=delta_diff.copy(),
+            where=twiss_delta != 0.0,
+        )
+        if not (relative_delta_diff <= 1e-13).all():
+            avg_diff = float(np.mean(relative_delta_diff))
+            raise ValueError(
+                f"Provided Twiss table has delta values that do not match the requested deltap ({deltap}); average relative difference is {avg_diff:.3e}"
+            )
+    xs = np.asarray([tws["x", start_elem]], dtype=float)
+    pxs = np.asarray([tws["px", start_elem]], dtype=float)
+    ys = np.asarray([tws["y", start_elem]], dtype=float)
+    pys = np.asarray([tws["py", start_elem]], dtype=float)
+    deltas = [deltap]
 
     monitored_line, total_turns, monitor_names = prepare_acd_line_with_monitors(
-        line=line,
+        line=working_line,
         tws=tws,
         acd_marker=acd_marker,
         ramp_turns=ramp_turns,
         flattop_turns=flattop_turns,
         driven_tunes=driven_tunes,
+        horizontal_excitation=horizontal_excitation,
+        vertical_excitation=vertical_excitation,
         lag=lag,
         bpm_pattern=bpm_pattern,
         insert_state_markers=state_markers,
@@ -418,7 +446,7 @@ def run_ac_dipole_tracking_with_particles(
         delta=deltas,
     )
 
-    logger.info(f"Tracking {num_particles} particles for {total_turns} turns")
+    logger.info("Tracking one particle for %d turns", total_turns)
     return run_tracking(
         line=monitored_line,
         particles=particles,

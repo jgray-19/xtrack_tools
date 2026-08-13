@@ -14,7 +14,7 @@ from scipy.signal import find_peaks
 from xtrack_tools.acd import (
     insert_ac_dipole,
     prepare_acd_line_with_monitors,
-    run_ac_dipole_tracking_with_particles,
+    run_ac_dipole_tracking,
     run_acd_track,
     run_acd_twiss,
 )
@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
 LHCB1_SEQ_NAME = "lhcb1"
 ACD_MARKER_NAME = "mkqa.6l4.b1"
+TEST_EXCITATION = 0.084
+LHC_HORIZONTAL_EXCITATION = 0.000371554879506
+LHC_VERTICAL_EXCITATION = 0.000415765635123
+PSB_HORIZONTAL_EXCITATION = 0.0161417197205
+PSB_VERTICAL_EXCITATION = 0.011008
 
 
 def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
@@ -34,7 +39,16 @@ def test_insert_ac_dipole(test_line: xt.Line, twiss_table: xt.TwissTable):
     driven_tunes = [0.16, 0.18]
 
     initial_num_elements = len(test_line.elements)
-    new_line = insert_ac_dipole(test_line, twiss_table, ACD_MARKER_NAME, acd_ramp, total_turns, driven_tunes)
+    new_line = insert_ac_dipole(
+        test_line,
+        twiss_table,
+        ACD_MARKER_NAME,
+        acd_ramp,
+        total_turns,
+        driven_tunes,
+        horizontal_excitation=TEST_EXCITATION,
+        vertical_excitation=TEST_EXCITATION,
+    )
 
     assert new_line is not test_line
     assert len(test_line.elements) == initial_num_elements
@@ -120,6 +134,8 @@ def test_prepare_acd_line_with_monitors_computes_twiss_when_missing(test_line: x
         ramp_turns=3,
         flattop_turns=2,
         driven_tunes=[0.16, 0.18],
+        horizontal_excitation=TEST_EXCITATION,
+        vertical_excitation=TEST_EXCITATION,
         lag=0.0,
         bpm_pattern="bpm.",
     )
@@ -145,35 +161,59 @@ def test_run_acd_twiss_raises_when_marker_is_missing():
         run_acd_twiss(line, acd_marker=ACD_MARKER_NAME, dpp=0.0, driven_tunes=[0.16, 0.18])
 
 
-def test_run_ac_dipole_tracking_with_particles_supports_explicit_coords(test_line: xt.Line):
-    """Test AC-dipole tracking accepts explicit particle coordinates."""
-    tracked_line = run_ac_dipole_tracking_with_particles(
+def test_run_ac_dipole_tracking_tracks_one_closed_orbit_particle(test_line: xt.Line):
+    """ACD tracking starts from the particle closed orbit and tracks one particle."""
+    tracked_line = run_ac_dipole_tracking(
         line=test_line,
         tws=None,
         sequence_name=LHCB1_SEQ_NAME,
         acd_marker=ACD_MARKER_NAME,
         ramp_turns=2,
         flattop_turns=3,
-        driven_tunes=None,
-        particle_coords={
-            "x": [1e-6, 2e-6],
-            "px": [0.0, 0.0],
-            "y": [0.0, 1e-6],
-            "py": [0.0, 0.0],
-        },
+        driven_tunes=[0.16, 0.18],
+        horizontal_excitation=TEST_EXCITATION,
+        vertical_excitation=TEST_EXCITATION,
     )
 
     monitor = tracked_line.record_multi_element_last_track
     assert monitor is not None
-    assert np.asarray(monitor.get("x")).shape == (5, 2, 4)
-    assert np.asarray(monitor.get("y")).shape == (5, 2, 4)
+    assert np.asarray(monitor.get("x")).shape == (5, 1, 4)
+    assert np.asarray(monitor.get("y")).shape == (5, 1, 4)
 
 
-def test_run_ac_dipole_tracking_with_particles_defaults_to_first_line_element(
+def test_acd_excitation_scales_installed_kick(test_line: xt.Line, twiss_table: xt.TwissTable):
+    small = run_ac_dipole_tracking(
+        line=test_line,
+        tws=twiss_table,
+        sequence_name=LHCB1_SEQ_NAME,
+        acd_marker=ACD_MARKER_NAME,
+        ramp_turns=1,
+        flattop_turns=1,
+        driven_tunes=[0.16, 0.18],
+        horizontal_excitation=0.01,
+        vertical_excitation=0.01,
+    )
+    large = run_ac_dipole_tracking(
+        line=test_line,
+        tws=twiss_table,
+        sequence_name=LHCB1_SEQ_NAME,
+        acd_marker=ACD_MARKER_NAME,
+        ramp_turns=1,
+        flattop_turns=1,
+        driven_tunes=[0.16, 0.18],
+        horizontal_excitation=0.02,
+        vertical_excitation=0.02,
+    )
+
+    assert np.isclose(large[f"{ACD_MARKER_NAME}_x"].volt, 2.0 * small[f"{ACD_MARKER_NAME}_x"].volt)
+    assert np.isclose(large[f"{ACD_MARKER_NAME}_y"].volt, 2.0 * small[f"{ACD_MARKER_NAME}_y"].volt)
+
+
+def test_run_ac_dipole_tracking_defaults_to_first_line_element(
     test_line: xt.Line, twiss_table: xt.TwissTable
 ):
     """Test missing start_marker behaves like explicitly selecting the first line element."""
-    implicit_start = run_ac_dipole_tracking_with_particles(
+    implicit_start = run_ac_dipole_tracking(
         line=test_line,
         tws=twiss_table,
         sequence_name=LHCB1_SEQ_NAME,
@@ -181,12 +221,11 @@ def test_run_ac_dipole_tracking_with_particles_defaults_to_first_line_element(
         ramp_turns=1,
         flattop_turns=2,
         driven_tunes=[0.16, 0.18],
-        action_list=[1e-6],
-        angle_list=[0.5],
-        use_diagonal_kicks=False,
         start_marker=None,
+        horizontal_excitation=TEST_EXCITATION,
+        vertical_excitation=TEST_EXCITATION,
     )
-    explicit_start = run_ac_dipole_tracking_with_particles(
+    explicit_start = run_ac_dipole_tracking(
         line=test_line,
         tws=twiss_table,
         sequence_name=LHCB1_SEQ_NAME,
@@ -194,10 +233,9 @@ def test_run_ac_dipole_tracking_with_particles_defaults_to_first_line_element(
         ramp_turns=1,
         flattop_turns=2,
         driven_tunes=[0.16, 0.18],
-        action_list=[1e-6],
-        angle_list=[0.5],
-        use_diagonal_kicks=False,
         start_marker="drift1",
+        horizontal_excitation=TEST_EXCITATION,
+        vertical_excitation=TEST_EXCITATION,
     )
 
     implicit_monitor = implicit_start.record_multi_element_last_track
@@ -221,6 +259,8 @@ def test_run_acd_track_uses_default_driven_tunes_and_returns_flattop_data(seq_b1
         flattop_turns=3,
         driven_tunes=None,
         json_path=tmp_path / "acd_track.json",
+        horizontal_excitation=LHC_HORIZONTAL_EXCITATION,
+        vertical_excitation=LHC_VERTICAL_EXCITATION,
     )
 
     assert isinstance(tracking_df, pd.DataFrame)
@@ -244,6 +284,8 @@ def test_psb_acd_tracking_records_br3_bpms(seq_psb: Path):
         driven_tunes=[0.16, 0.22],
         bpm_pattern=r"(?i)br3\.bpm.*",
         add_variance_columns=False,
+        horizontal_excitation=PSB_HORIZONTAL_EXCITATION,
+        vertical_excitation=PSB_VERTICAL_EXCITATION,
     )
 
     assert f"{acd_marker_name}_x" in tracked_line.element_names

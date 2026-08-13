@@ -28,6 +28,14 @@ _DEFAULT_NUM_MULTIPOLE_KICKS = 64
 _EXACT_THICK_TYPES = ("Quadrupole", "Sextupole", "Octupole", "Multipole")
 
 
+def _numeric_strength(element: xt.BeamElement, attr: str) -> float:
+    """Return a numeric strength, resolving xtrack's derived bend k0 sentinel."""
+    value = getattr(element, attr, 0.0)
+    if value == "from_h":
+        return float(element.h)
+    return float(value or 0.0)
+
+
 def _configure_line_models(
     line: xt.Line, num_multipole_kicks: int = _DEFAULT_NUM_MULTIPOLE_KICKS
 ) -> None:
@@ -276,7 +284,7 @@ def initialise_env(
                     f"Cannot apply integrated perturbation {str_name!r} to zero-length element"
                 )
             delta = strength / length
-            current = getattr(element, base_attr, 0.0) or 0.0
+            current = _numeric_strength(element, base_attr)
             logger.debug(
                 "Applying integrated delta %s to %s.%s as per-length delta %s (was %s)",
                 strength,

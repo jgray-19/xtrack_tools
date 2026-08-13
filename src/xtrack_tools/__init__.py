@@ -1,6 +1,6 @@
 from .acd import (
     insert_ac_dipole,
-    run_ac_dipole_tracking_with_particles,
+    run_ac_dipole_tracking,
     run_acd_track,
     run_acd_twiss,
 )
@@ -32,7 +32,7 @@ from .tracking import (
 
 __all__ = [
     "insert_ac_dipole",
-    "run_ac_dipole_tracking_with_particles",
+    "run_ac_dipole_tracking",
     "run_acd_track",
     "run_acd_twiss",
     "create_xsuite_environment",

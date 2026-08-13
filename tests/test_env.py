@@ -3,19 +3,43 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
+import xtrack as xt
 
-from xtrack_tools.env import create_xsuite_environment, initialise_env
+from xtrack_tools.env import _numeric_strength, create_xsuite_environment, initialise_env
 
 BEAM_ENERGY = 6800
 LHCB1_SEQ_NAME = "lhcb1"
 
 
+@pytest.fixture(scope="module")
+def shared_json_file(tmp_path_factory):
+    """A JSON environment cache built once and reused by tests that don't
+    exercise the cache-invalidation logic itself (that's covered by
+    ``test_create_xsuite_environment``), avoiding a repeat ~20s MAD-X rebuild
+    of the full LHC sequence per test.
+    """
+    seq_b1 = Path(__file__).parent / "data" / "sequences" / "lhcb1.seq"
+    json_file = tmp_path_factory.mktemp("shared_env") / "lhcb1.json"
+    create_xsuite_environment(sequence_file=seq_b1, seq_name=LHCB1_SEQ_NAME, json_file=json_file)
+    return json_file
+
+
 @pytest.mark.slow
 def test_create_xsuite_environment(tmp_path, seq_b1):
+    # Work on a copy: this test bumps the sequence file's mtime below to
+    # force cache invalidation, and must not touch the shared checked-out
+    # seq_b1 file or it would permanently poison its on-disk JSON cache for
+    # every other test that relies on mtime comparison against it.
+    seq_b1_copy = tmp_path / seq_b1.name
+    shutil.copy2(seq_b1, seq_b1_copy)
+    seq_b1 = seq_b1_copy
+
     json_file = tmp_path / "lhcb1.json"
     json_file.unlink(missing_ok=True)
     env = create_xsuite_environment(
@@ -69,6 +93,14 @@ def test_create_xsuite_environment_requires_sequence_file():
         create_xsuite_environment(sequence_file=None)
 
 
+def test_numeric_strength_resolves_bend_k0_from_h():
+    """xtrack exposes derived bend k0 as 'from_h'; tools need the numeric value."""
+    bend = xt.Bend(length=2.0, angle=-0.5, k0_from_h=True)
+
+    assert bend.k0 == "from_h"
+    assert np.isclose(_numeric_strength(bend, "k0"), -0.25)
+
+
 @pytest.mark.parametrize(
     "qx, qy, k1_mqy, k0_mb, k2_mcs",
     [
@@ -80,10 +112,9 @@ def test_create_xsuite_environment_requires_sequence_file():
         "Init test case 2",
     ],
 )
-def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, tmp_path):
+def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, shared_json_file):
     """Test initialise_env function."""
-    json_file = tmp_path / "temp_xsuite.json"
-    json_file.unlink(missing_ok=True)
+    json_file = shared_json_file
     matched_tunes = {"dqx_b1_op": qx, "dqy_b1_op": qy}
     magnet_strengths = {
         "mqy.b5l2.b1.k1": k1_mqy,
@@ -114,10 +145,10 @@ def test_initialise_env(corrector_table, seq_b1, qx, qy, k1_mqy, k0_mb, k2_mcs, 
 
 
 def test_initialise_env_converts_integrated_dknl_to_per_length_strength(
-    corrector_table, seq_b1, tmp_path
+    corrector_table, seq_b1, shared_json_file
 ):
     """Integrated dk*l perturbations are applied as per-length k* deltas."""
-    json_file = tmp_path / "temp_xsuite.json"
+    json_file = shared_json_file
     element_name = "mqy.b5l2.b1"
     integrated_delta = 2.0e-6
 
