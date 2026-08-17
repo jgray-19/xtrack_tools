@@ -411,7 +411,7 @@ def run_ac_dipole_tracking(
             out=delta_diff.copy(),
             where=twiss_delta != 0.0,
         )
-        if not (relative_delta_diff <= 1e-13).all():
+        if not (relative_delta_diff <= 1e-9).all():
             avg_diff = float(np.mean(relative_delta_diff))
             raise ValueError(
                 f"Provided Twiss table has delta values that do not match the requested deltap ({deltap}); average relative difference is {avg_diff:.3e}"

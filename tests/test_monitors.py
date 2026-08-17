@@ -163,3 +163,49 @@ def test_xsuite_tws_to_ng_converts_columns_and_headers(twiss_table: xt.TwissTabl
     assert {"beta11", "beta22", "alfa11", "alfa22", "mu1", "mu2"} <= set(ng_twiss.columns)
     assert np.isclose(ng_twiss.headers["q1"], float(twiss_table.qx % 1))
     assert np.isclose(ng_twiss.headers["q2"], float(twiss_table.qy % 1))
+
+
+@pytest.mark.parametrize(
+    ("momentum", "conjugate"),
+    [("pt", "pt"), ("delta", "delta")],
+)
+def test_xsuite_tws_to_ng_dispersion_reproduces_off_momentum_orbit(
+    seq_psb: Path, momentum: str, conjugate: str
+):
+    """Test converted dispersion columns rebuild the exact off-momentum closed orbit.
+
+    Pins both halves of the convention: the Taylor 1/2 folded into ``dd*`` and
+    the ``delta -> pt`` rescaling, by checking that ``x0 + q*dx + q^2*ddx``
+    (the form the consumers evaluate, with no extra factors) matches the exact
+    off-momentum twiss to third order.
+    """
+    env = create_xsuite_environment(
+        sequence_file=seq_psb,
+        kinetic_energy=0.160,
+        seq_name="psb3",
+        json_file=seq_psb.parent / f"{seq_psb.stem}.json",
+    )
+    line = env["psb3"]
+    tws = line.twiss(method="4d")
+
+    delta = 1e-3
+    beta0 = float(np.atleast_1d(tws.particle_on_co.beta0)[0])
+    gamma0 = float(np.atleast_1d(tws.particle_on_co.gamma0)[0])
+    pt = np.sqrt((1 + delta) ** 2 + 1 / (beta0 * gamma0) ** 2) - 1 / beta0
+    q = pt if conjugate == "pt" else delta
+
+    exact = line.twiss(method="4d", delta0=delta)
+    ng = xsuite_tws_to_ng(tws, momentum=momentum)
+
+    for plane in ("x", "px"):
+        predicted = (
+            ng[plane].to_numpy()
+            + q * ng[f"d{plane}"].to_numpy()
+            + q**2 * ng[f"dd{plane}"].to_numpy()
+        )
+        linear = ng[plane].to_numpy() + q * ng[f"d{plane}"].to_numpy()
+        residual = np.max(np.abs(predicted - getattr(exact, plane)))
+        first_order = np.max(np.abs(linear - getattr(exact, plane)))
+        assert residual < 1e-8
+        # Second order must actually help by orders of magnitude, not a few per cent.
+        assert residual < first_order / 100

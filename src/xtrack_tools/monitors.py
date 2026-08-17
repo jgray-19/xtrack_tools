@@ -253,15 +253,46 @@ def process_tracking_data(
     return tracking_df
 
 
-def xsuite_tws_to_ng(tws) -> pd.DataFrame:
-    """Convert an xsuite Twiss object to an NG-compatible ``tfs`` DataFrame.
+def xsuite_tws_to_ng(tws, *, momentum: str = "pt") -> pd.DataFrame:
+    r"""Convert an xsuite Twiss object to an NG-compatible ``tfs`` DataFrame.
+
+    Besides renaming the optics columns this puts the dispersion columns into
+    MAD-NG's convention, which differs from xsuite's in two ways:
+
+    * xsuite's ``ddx``/``ddpx``/``ddy``/``ddpy`` are plain second derivatives,
+      while MAD-NG's ``chrom=true`` twiss folds the Taylor :math:`1/2` into them.
+    * xsuite differentiates with respect to ``delta = dp/p``, MAD-NG with
+      respect to the energy coordinate ``pt``. The two differ by factors of the
+      relativistic ``beta0`` (~0.52 on the PSB at 160 MeV, i.e. nowhere near 1).
+
+    With :math:`\delta = \delta(p_t) = p_t/\beta_0 - p_t^2/(2\beta_0^2\gamma_0^2)`
+    the returned columns satisfy, for ``momentum="pt"``,
+
+    .. math:: x(p_t) = x_{co} + p_t\,D_x + p_t^2\,D_x^{(2)},
+
+    i.e. exactly the form the consumers evaluate (no extra factors), with
+
+    .. math:: D_x = \frac{d_x}{\beta_0}, \qquad
+              D_x^{(2)} = \frac{dd_x}{2\beta_0^2} - \frac{d_x}{2\beta_0^2\gamma_0^2}.
 
     Args:
         tws: xsuite Twiss object.
+        momentum: Conjugate variable of the returned dispersion columns.
+            ``"pt"`` (default) gives full MAD-NG conventions: ``dx``/``dpx``/
+            ``dy``/``dpy`` are derivatives w.r.t. ``pt`` and ``ddx``/``ddpx``/
+            ``ddy``/``ddpy`` are the *second-order coefficients* w.r.t. ``pt``
+            (Taylor 1/2 already folded in). ``"delta"`` keeps xsuite's
+            ``delta = dp/p`` as the conjugate variable — first-order columns are
+            passed through unchanged and the second-order ones are still turned
+            into coefficients (``ddx/2``), so the same consumer formula applies
+            with ``delta`` substituted for ``pt``. Use it only for pipelines that
+            stay in ``delta`` end to end.
 
     Returns:
         A ``tfs.TfsDataFrame`` with NG-compatible column names and headers.
     """
+    if momentum not in ("pt", "delta"):
+        raise ValueError(f"momentum must be 'pt' or 'delta', got {momentum!r}")
     logger.info("Converting xsuite Twiss table with %d rows to NG-compatible format", len(tws.name))
     tws_df = tws.to_pandas()
     tws_df = tfs.TfsDataFrame(tws_df)
@@ -277,5 +308,17 @@ def xsuite_tws_to_ng(tws) -> pd.DataFrame:
             "muy": "mu2",
         }
     )
+    # delta(q) = lin * q + quad * q^2, with q the requested conjugate variable.
+    if momentum == "pt":
+        beta0 = float(np.atleast_1d(tws.particle_on_co.beta0)[0])
+        gamma0 = float(np.atleast_1d(tws.particle_on_co.gamma0)[0])
+        lin, quad = 1.0 / beta0, -1.0 / (2 * beta0**2 * gamma0**2)
+    else:
+        lin, quad = 1.0, 0.0
+    for plane in ("x", "px", "y", "py"):
+        first, second = f"d{plane}", f"dd{plane}"
+        tws_df[second] = 0.5 * tws_df[second] * lin**2 + tws_df[first] * quad
+        tws_df[first] = tws_df[first] * lin
+
     tws_df.headers = {"q1": float(tws.qx % 1), "q2": float(tws.qy % 1)}
     return tws_df.set_index("name")
