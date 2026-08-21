@@ -33,6 +33,29 @@ def get_element_s_centre(line: xt.Line, element_name: str, table: Any | None = N
     return float(line_table["s_center", element_name])
 
 
+def get_explicit_element_s_centre(line: xt.Line, element_name: str) -> float | None:
+    """Return the source-resolved centre position when the line retains one.
+
+    MAD-X sequence import preserves placement definitions in the line composer.
+    Once materialised, a line stores intervening drifts and its table
+    reconstructs ``s`` by summation, which can differ by a few ulps from the
+    source-resolved coordinate. This uses the composer's own resolver rather
+    than inspecting placement implementation details. A line without a composer
+    has no retained source-placement result, so callers must use
+    :func:`get_element_s_centre` instead.
+    """
+    element_name = resolve_element_name(line, element_name)
+    composer = line.composer
+    if composer is None:
+        return None
+
+    try:
+        positions = composer.resolve_s_positions()
+        return float(positions["s_center", element_name])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def next_available_element_name(line: xt.Line, base_name: str) -> str:
     """Return an element name that is unused in both the line and its environment."""
     candidate = base_name

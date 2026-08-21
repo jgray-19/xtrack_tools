@@ -18,7 +18,7 @@ from xtrack_tools.acd import (
     run_acd_track,
     run_acd_twiss,
 )
-from xtrack_tools.line import get_element_s_centre
+from xtrack_tools.line import get_element_s_centre, get_explicit_element_s_centre
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -90,6 +90,24 @@ def test_get_element_s_position_raises_for_missing_element(test_line: xt.Line):
     """Test requesting an unknown element position raises ValueError."""
     with pytest.raises(ValueError, match="Element 'missing.bpm' not found in the line."):
         get_element_s_centre(test_line, "missing.bpm")
+
+
+def test_explicit_source_position_uses_the_composer_resolution() -> None:
+    """A preserved MAD-X ``at`` placement wins over drift-summed coordinates."""
+    env = xt.Environment()
+    env.new("source_marker", xt.Marker)
+    line = env.new_line(
+        components=[env.place("source_marker", at=12.3456789012345)]
+    )
+
+    assert get_explicit_element_s_centre(line, "source_marker") == pytest.approx(
+        12.3456789012345, abs=1e-14
+    )
+
+
+def test_explicit_source_position_is_unavailable_on_plain_lines(test_line: xt.Line) -> None:
+    """Programmatic lines retain the existing line-table placement fallback."""
+    assert get_explicit_element_s_centre(test_line, ACD_MARKER_NAME) is None
 
 
 def test_run_acd_twiss(test_line: xt.Line):

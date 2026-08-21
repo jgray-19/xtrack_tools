@@ -8,7 +8,11 @@ import xtrack as xt
 from xobjects import ContextCpu as Context
 
 from .env import create_xsuite_environment
-from .line import get_element_s_centre, resolve_element_name
+from .line import (
+    get_element_s_centre,
+    get_explicit_element_s_centre,
+    resolve_element_name,
+)
 from .monitors import get_monitor_names_at_pattern, process_tracking_data
 from .tracking import run_tracking
 
@@ -36,6 +40,7 @@ def insert_ac_dipole(
     vertical_excitation: float,
     lag: float = 0.0,
     insert_state_markers: bool = False,
+    placement_s: float | None = None,
 ) -> xt.Line:
     """Insert horizontal and vertical AC dipoles at the AC dipole marker.
 
@@ -57,6 +62,7 @@ def insert_ac_dipole(
     Returns:
         A new line with AC dipole elements inserted.
     """
+    source_placement_s = get_explicit_element_s_centre(line, acd_marker)
     line = line.copy()
     betxac = tws.rows[acd_marker]["betx"]
     betyac = tws.rows[acd_marker]["bety"]
@@ -84,7 +90,11 @@ def insert_ac_dipole(
         lag=lag,
         ramp=[0, acd_ramp, total_turns, total_turns + acd_ramp],
     )
-    placement = get_element_s_centre(line, acd_marker)
+    placement = placement_s
+    if placement is None:
+        placement = source_placement_s
+    if placement is None:
+        placement = get_element_s_centre(line, acd_marker)
     # Insert every element in a single ``line.insert`` call: each insert re-slices
     # the whole (thick) line via ``cut_at_s``, which dominates the runtime for large
     # lattices, so batching turns N re-slices into one. Ordering within the batch is
@@ -116,6 +126,7 @@ def prepare_acd_line_with_monitors(
     lag: float,
     bpm_pattern: str,
     insert_state_markers: bool = False,
+    placement_s: float | None = None,
 ) -> tuple[xt.Line, int, list[str]]:
     """Insert AC dipole and prepare multi-element BPM monitoring.
 
@@ -155,6 +166,7 @@ def prepare_acd_line_with_monitors(
         vertical_excitation=vertical_excitation,
         lag=lag,
         insert_state_markers=insert_state_markers,
+        placement_s=placement_s,
     )
     monitor_names = get_monitor_names_at_pattern(tracked_line, bpm_pattern)
     if insert_state_markers:
@@ -282,8 +294,10 @@ def run_acd_track(
         kinetic_energy=kinetic_energy,
         seq_name=sequence_name,
     )
-    baseline_line: xt.Line = env[sequence_name].copy()
-    acd_marker = resolve_element_name(baseline_line, acd_marker)
+    source_line = env[sequence_name]
+    acd_marker = resolve_element_name(source_line, acd_marker)
+    placement_s = get_explicit_element_s_centre(source_line, acd_marker)
+    baseline_line: xt.Line = source_line.copy()
     tws_input: xt.TwissTable = baseline_line.twiss(method="4d", delta0=delta_p)
 
     qx = float(tws_input.qx % 1)
@@ -309,6 +323,7 @@ def run_acd_track(
         lag=0.0,
         bpm_pattern=bpm_pattern,
         insert_state_markers=state_markers,
+        placement_s=placement_s,
     )
 
     ctx = Context()
@@ -389,12 +404,15 @@ def run_ac_dipole_tracking(
         driven_tunes = [0.27, 0.322]
     acd_marker = resolve_element_name(line, acd_marker)
     logger.info(
-        "Running AC-dipole particle tracking with ramp_turns=%d flattop_turns=%d bpm_pattern='%s'",
+        "Running AC-dipole particle tracking with ramp_turns=%d flattop_turns=%d bpm_pattern='%s' acd_marker='%s' driven_tunes=%s",
         ramp_turns,
         flattop_turns,
         bpm_pattern,
+        acd_marker,
+        driven_tunes,
     )
 
+    placement_s = get_explicit_element_s_centre(line, acd_marker)
     working_line = line.copy()
     if start_marker is not None:
         working_line.cycle(name_first_element=start_marker.lower(), inplace=True)
@@ -434,6 +452,7 @@ def run_ac_dipole_tracking(
         lag=lag,
         bpm_pattern=bpm_pattern,
         insert_state_markers=state_markers,
+        placement_s=placement_s,
     )
 
     ctx = Context()

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # enough kicks. 64 reaches machine precision per element for LHC-strength quads
 # (see tests/test_madng_element_precision.py); it is *not* a slicing count -- the
 # thick element stays intact and is integrated internally.
-_DEFAULT_NUM_MULTIPOLE_KICKS = 64
+_DEFAULT_NUM_MULTIPOLE_KICKS = 32
 
 # Element types whose thick body is integrated with the exact drift-kick-drift
 # model. Bends are configured separately (see below).
