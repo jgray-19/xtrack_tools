@@ -119,3 +119,103 @@ def apply_vertical_quad_misalignment(
         rms, seed, len(shifts),
     )
     return shifts
+
+
+def apply_quad_tilt(
+    line: xt.Line,
+    *,
+    rms: float,
+    seed: int,
+    name_prefix: str | None = None,
+) -> dict[str, float]:
+    """Apply a seeded roll about the ``s`` axis to every quadrupole in place.
+
+    Each :class:`xtrack.Quadrupole` is rolled by an independent draw from
+    ``N(0, rms)`` via its ``rot_s_rad`` attribute. A rolled quadrupole carries a
+    skew component ``~ 2 * theta * k1l``, which couples the horizontal dispersion
+    into the vertical plane. This is the cheapest physical way to give a tracking
+    line a genuine vertical dispersion that a nominal (untilted) model does not
+    know about -- unlike :func:`apply_vertical_quad_misalignment`, which kicks the
+    vertical *orbit* but leaves ``Dy`` essentially untouched.
+
+    Args:
+        line: Line to modify in place.
+        rms: Standard deviation of the roll angle in radians (e.g. ``5e-4`` for
+            0.5 mrad).
+        seed: Seed for the ``numpy`` random generator (reproducible).
+        name_prefix: If given, only elements whose name starts with this prefix
+            (case-insensitive) are considered.
+
+    Returns:
+        ``{name: rot_s_rad}`` for every tilted quadrupole.
+    """
+    rng = np.random.default_rng(seed)
+    tilts: dict[str, float] = {}
+    for name, element in _iter_named_elements(line, name_prefix):
+        if not isinstance(element, xt.Quadrupole):
+            continue
+        tilt = float(rng.normal(0.0, rms))
+        element.rot_s_rad = tilt
+        tilts[name] = tilt
+    logger.info(
+        "Applied quadrupole tilt (rms=%.2e rad, seed=%d) to %d quadrupoles",
+        rms,
+        seed,
+        len(tilts),
+    )
+    return tilts
+
+
+def correct_closed_orbit(
+    line: xt.Line,
+    *,
+    monitor_prefix: str,
+    corrector_prefix_x: str,
+    corrector_prefix_y: str,
+    n_singular_values: int | None = None,
+) -> dict[str, float]:
+    """Steer the closed orbit flat with the machine's own orbit correctors.
+
+    Real error lattices are steered by operators before measurement, leaving a
+    few mm of residual orbit. Note the correctors are dipoles, so the corrected
+    line carries their dispersion even though its closed orbit is flat.
+
+    Args:
+        line: Line to correct in place.
+        monitor_prefix: Case-insensitive name prefix selecting the BPMs.
+        corrector_prefix_x: Case-insensitive name prefix selecting the horizontal
+            correctors.
+        corrector_prefix_y: As above, vertical.
+        n_singular_values: Truncate the correction SVD to this rank. ``None``
+            uses every mode.
+
+    Returns:
+        ``{"x_before": .., "x_after": .., "y_before": .., "y_after": ..}`` closed
+        orbit RMS at the BPMs in metres.
+    """
+    monitors, correctors_x, correctors_y = (
+        [name for name, _ in _iter_named_elements(line, prefix)]
+        for prefix in (monitor_prefix, corrector_prefix_x, corrector_prefix_y)
+    )
+    if not (monitors and correctors_x and correctors_y):
+        raise ValueError(
+            f"orbit correction found monitors={len(monitors)} "
+            f"correctors_x={len(correctors_x)} correctors_y={len(correctors_y)}; "
+            "check the prefixes"
+        )
+
+    def _orbit_rms(stage: str) -> dict[str, float]:
+        tws = line.twiss(method="4d").rows[monitors]
+        return {f"{p}_{stage}": float(np.sqrt(np.mean(tws[p] ** 2))) for p in ("x", "y")}
+
+    rms = _orbit_rms("before")
+    line.correct_trajectory(
+        monitor_names_x=monitors,
+        monitor_names_y=monitors,
+        corrector_names_x=correctors_x,
+        corrector_names_y=correctors_y,
+        n_singular_values=n_singular_values,
+    )
+    rms |= _orbit_rms("after")
+    logger.info("Orbit correction (%d BPMs): %s", len(monitors), rms)
+    return rms

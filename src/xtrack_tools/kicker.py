@@ -230,7 +230,10 @@ def run_kicker_track(
     tkicker_name = make_element_thin(baseline_line, tkicker_name)
     s_kicker = get_element_s_centre(baseline_line, tkicker_name)
 
-    tws: xt.TwissTable = baseline_line.twiss(method="4d")
+    # Launch on the closed orbit *at the tracked momentum*: an off-momentum
+    # particle put on the on-momentum orbit betatron-oscillates from turn one,
+    # so there would be no undisturbed pre-kick reference.
+    tws: xt.TwissTable = baseline_line.twiss(method="4d", delta0=delta_p)
     frev = float(1.0 / tws.t_rev0)
     logger.info("tkicker '%s' at s=%.3f m, frev=%.6f Hz", tkicker_name, s_kicker, frev)
 

@@ -13,8 +13,10 @@ if TYPE_CHECKING:
 
 from xtrack_tools.env import create_xsuite_environment
 from xtrack_tools.errors import (
+    apply_quad_tilt,
     apply_relative_bend_field_errors,
     apply_vertical_quad_misalignment,
+    correct_closed_orbit,
 )
 
 PSB_SEQ_NAME = "psb3"
@@ -162,3 +164,79 @@ def test_quad_misalignment_distorts_vertical_orbit(psb_line: xt.Line):
     apply_vertical_quad_misalignment(psb_line, rms=2e-4, seed=5, name_prefix=QUAD_PREFIX)
     distorted = psb_line.twiss(method="4d")
     assert float(np.abs(distorted.y).max()) > 1e-4
+
+
+# ---------------------------------------------------------------------------
+# Quad tilt
+# ---------------------------------------------------------------------------
+
+
+def test_quad_tilt_sets_rot_s_rad_on_quads_only(psb_line: xt.Line):
+    """Only quadrupoles are rolled, with the requested RMS."""
+    rms = 5e-4
+    tilts = apply_quad_tilt(psb_line, rms=rms, seed=11, name_prefix=QUAD_PREFIX)
+
+    assert len(tilts) > 5
+    for name, value in tilts.items():
+        element = psb_line[name]
+        assert isinstance(element, xt.Quadrupole)
+        assert float(element.rot_s_rad) == pytest.approx(value)
+    assert np.std(list(tilts.values())) == pytest.approx(rms, rel=0.6)
+
+
+def test_quad_tilt_creates_vertical_dispersion_and_coupling(psb_line: xt.Line):
+    """Rolled quads couple Dx into Dy and open |c-| without moving the orbit."""
+    nominal = psb_line.twiss(method="4d")
+    assert float(np.abs(nominal.dy).max()) < 1e-9
+    assert nominal.c_minus < 1e-6
+
+    apply_quad_tilt(psb_line, rms=5e-4, seed=11, name_prefix=QUAD_PREFIX)
+    tilted = psb_line.twiss(method="4d")
+
+    # Pure skew-quad errors on a flat orbit do not steer the beam.
+    assert float(np.abs(tilted.y).max()) < 1e-9
+    # Dy ~ theta * k1l * Dx * beta: a few mm for PSB at 0.5 mrad.
+    assert float(np.abs(tilted.dy).max()) > 1e-3
+    assert tilted.c_minus > 1e-4
+
+
+# ---------------------------------------------------------------------------
+# Closed orbit correction
+# ---------------------------------------------------------------------------
+
+BPM_PREFIX = "br3.bpm"
+HCORR_PREFIX = "br3.dhz"
+VCORR_PREFIX = "br3.dvt"
+
+
+def test_correct_closed_orbit_flattens_orbit(psb_line: xt.Line):
+    """Correcting a distorted orbit reduces the BPM RMS in both planes."""
+    apply_relative_bend_field_errors(psb_line, rms=8e-4, seed=7, name_prefix=MAIN_BEND_PREFIX)
+    apply_vertical_quad_misalignment(psb_line, rms=2e-4, seed=5, name_prefix=QUAD_PREFIX)
+
+    rms = correct_closed_orbit(
+        psb_line,
+        monitor_prefix=BPM_PREFIX,
+        corrector_prefix_x=HCORR_PREFIX,
+        corrector_prefix_y=VCORR_PREFIX,
+    )
+
+    assert rms["x_before"] > 1e-4
+    assert rms["y_before"] > 1e-4
+    assert rms["x_after"] < 0.2 * rms["x_before"]
+    assert rms["y_after"] < 0.2 * rms["y_before"]
+    # The returned numbers are the real orbit at the BPMs.
+    tws = psb_line.twiss(method="4d")
+    bpms = [n for n in tws.name if str(n).startswith(BPM_PREFIX)]
+    assert np.sqrt(np.mean(tws.rows[bpms].x ** 2)) == pytest.approx(rms["x_after"])
+
+
+def test_correct_closed_orbit_rejects_bad_prefix(psb_line: xt.Line):
+    """A prefix that matches nothing raises instead of silently doing nothing."""
+    with pytest.raises(ValueError, match="check the prefixes"):
+        correct_closed_orbit(
+            psb_line,
+            monitor_prefix="no_such_bpm",
+            corrector_prefix_x=HCORR_PREFIX,
+            corrector_prefix_y=VCORR_PREFIX,
+        )

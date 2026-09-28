@@ -357,7 +357,7 @@ def run_ac_dipole_tracking(
     line: xt.Line,
     acd_marker: str,
     sequence_name: str,
-    driven_tunes: list[float] | None = None,
+    driven_tunes: list[float] | tuple[float, float] | None = None,
     tws: xt.TwissTable | None = None,
     ramp_turns: int = 1000,
     flattop_turns: int = 100,
