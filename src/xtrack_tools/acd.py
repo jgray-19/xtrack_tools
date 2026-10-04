@@ -423,16 +423,12 @@ def run_ac_dipole_tracking(
     else:
         twiss_delta = np.asarray(tws["delta"], dtype=float)
         delta_diff = np.abs(twiss_delta - deltap)
-        relative_delta_diff = np.divide(
-            delta_diff,
-            np.abs(twiss_delta),
-            out=delta_diff.copy(),
-            where=twiss_delta != 0.0,
-        )
-        if not (relative_delta_diff <= 1e-9).all():
-            avg_diff = float(np.mean(relative_delta_diff))
+        # Relative to the requested deltap, with an absolute floor: at deltap=0
+        # the twiss delta column holds round-off (~1e-17) that is not a mismatch.
+        tolerance = 1e-9 * max(abs(deltap), 1e-3)
+        if not (delta_diff <= tolerance).all():
             raise ValueError(
-                f"Provided Twiss table has delta values that do not match the requested deltap ({deltap}); average relative difference is {avg_diff:.3e}"
+                f"Provided Twiss table has delta values that do not match the requested deltap ({deltap}); max absolute difference is {delta_diff.max():.3e}"
             )
     xs = np.asarray([tws["x", start_elem]], dtype=float)
     pxs = np.asarray([tws["px", start_elem]], dtype=float)

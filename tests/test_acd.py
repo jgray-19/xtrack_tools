@@ -171,7 +171,7 @@ def test_run_acd_twiss_raises_when_marker_is_missing():
         element_names=["drift1", "bpm.1"],
     )
     line.particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV,
+        mass0=xp.PROTON_MASS_EV,
         energy0=450e9,
     )
 

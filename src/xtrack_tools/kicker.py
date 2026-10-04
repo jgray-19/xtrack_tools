@@ -85,7 +85,7 @@ def plot_kicker_tracking(
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    circumference = float(tws["circumference"])
+    circumference = float(tws["line_length"])
     tws_df = pd.DataFrame({
         "name": [str(n).upper() for n in tws.name],
         "s": tws.s,

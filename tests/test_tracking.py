@@ -81,7 +81,7 @@ def test_run_tracking_raises_if_any_particle_is_lost():
         element_names=["m0", "aper", "d1"],
     )
     line.particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV,
+        mass0=xp.PROTON_MASS_EV,
         energy0=450e9,
     )
     particles = line.build_particles(
@@ -119,7 +119,7 @@ def test_run_tracking_can_replace_thick_monitors_with_thin():
         ],
     )
     monitored_line.particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV,
+        mass0=xp.PROTON_MASS_EV,
         energy0=450e9,
     )
     original_element_names = tuple(monitored_line.element_names)

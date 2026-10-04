@@ -78,7 +78,7 @@ def test_env():
     )
 
     test_line.particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV,
+        mass0=xp.PROTON_MASS_EV,
         energy0=450e9,
     )
 

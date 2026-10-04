@@ -82,14 +82,14 @@ def _configure_exact_models(line: xt.Line) -> None:
             line.set(
                 rows,
                 model="drift-kick-drift-exact",
-                integrator="yoshida4",
+                integrator="yoshida-6",
                 num_multipole_kicks=NUM_SLICES,
             )
     if len(table.rows[table.element_type == "Bend"].name):
         line.configure_bend_model(
             core="bend-kick-bend",
             edge="full",
-            integrator="yoshida4",
+            integrator="yoshida-6",
             num_multipole_kicks=NUM_SLICES,
         )
 
@@ -132,7 +132,7 @@ def _xsuite_exit(seq_file: Path) -> np.ndarray:
     env = xt.load(file=seq_file, _rbend_correct_k0=True, format="madx")
     line = env[SEQ_NAME]
     line.particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV, kinetic_energy0=KINETIC_ENERGY_GEV * 1e9
+        mass0=xp.PROTON_MASS_EV, kinetic_energy0=KINETIC_ENERGY_GEV * 1e9
     )
     _configure_exact_models(line)
 

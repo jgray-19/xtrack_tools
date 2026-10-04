@@ -21,7 +21,7 @@ def thick_line() -> xt.Line:
         ],
         element_names=["drift1", "tkicker", "drift2"],
     )
-    line.particle_ref = xt.Particles(mass=xp.PROTON_MASS_EV, energy0=450e9)
+    line.particle_ref = xt.Particles(mass0=xp.PROTON_MASS_EV, energy0=450e9)
     return line
 
 

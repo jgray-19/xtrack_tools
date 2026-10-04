@@ -49,7 +49,7 @@ def _configure_line_models(
     accumulates into a ~5e-7 tune / ~1e-8 orbit difference, largest in the plane
     with the biggest angles (the crossing plane through the triplet).
 
-    Using ``drift-kick-drift-exact`` with the ``yoshida4`` integrator and enough
+    Using ``drift-kick-drift-exact`` with the ``yoshida-6`` integrator and enough
     kicks matches MAD-NG to machine precision per element. Bends already match
     with ``bend-kick-bend`` (~3e-14); the ``expanded`` / ``drift-kick-drift``
     bend cores are the paraxial ones and must *not* be used.
@@ -93,7 +93,7 @@ def _configure_line_models(
             line.set(
                 rows,
                 model="drift-kick-drift-exact",
-                integrator="yoshida4",
+                integrator="yoshida-6",
                 num_multipole_kicks=num_multipole_kicks,
             )
 
@@ -174,7 +174,7 @@ def create_xsuite_environment(
     # MAD-X converts sequence names to lowercase
     seq_name_lower = seq_name.lower()
     env[seq_name_lower].particle_ref = xt.Particles(
-        mass=xp.PROTON_MASS_EV,
+        mass0=xp.PROTON_MASS_EV,
         kinetic_energy0=kinetic_energy * 1e9,
     )
     logger.info(
